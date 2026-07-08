@@ -1,3 +1,13 @@
+from ai.estimation import (
+    calculer_prix_marche,
+    calculer_offre_depart,
+    calculer_prix_conseille,
+    calculer_prix_max,
+    calculer_benefice,
+    calculer_score
+)
+
+
 def analyser_annonce(voiture):
 
     try:
@@ -20,30 +30,22 @@ def analyser_annonce(voiture):
             "prix_max": 0
         }
 
-    # Estimation provisoire du marché
-    prix_marche = int(prix * 1.12)
+    prix_marche = calculer_prix_marche(prix)
 
-    benefice = prix_marche - prix
+    benefice = calculer_benefice(
+        prix,
+        prix_marche
+    )
 
-    # Calcul des prix de négociation
-    offre_depart = int(prix * 0.90)
-    prix_conseille = int(prix * 0.94)
-    prix_max = int(prix * 0.97)
+    offre_depart = calculer_offre_depart(prix)
 
-    score = 50
-    conseil = "Prix correct"
+    prix_conseille = calculer_prix_conseille(prix)
 
-    if benefice >= 1000:
-        score = 70
-        conseil = "Bonne affaire"
+    prix_max = calculer_prix_max(prix)
 
-    if benefice >= 2500:
-        score = 85
-        conseil = "Très bonne affaire"
-
-    if benefice >= 4000:
-        score = 95
-        conseil = "À acheter rapidement"
+    score, conseil = calculer_score(
+        benefice
+    )
 
     return {
         "score": score,
