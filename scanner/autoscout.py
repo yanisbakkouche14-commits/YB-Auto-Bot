@@ -83,6 +83,7 @@ def rechercher_voitures(modele):
                         "modele": nom,
                         "prix": f"{prix} €",
                         "ville": ville,
+                        "source": "AutoScout24",
                         "annee": item.get("vehicleModelDate", "Inconnue"),
                         "kilometrage": kilometrage,
                         "carburant": item.get("fuelType", "Inconnu"),

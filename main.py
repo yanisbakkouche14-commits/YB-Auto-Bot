@@ -9,7 +9,7 @@ from database.database import ajouter_annonce
 
 from ai.analyse import analyser_annonce
 from ai.marche import analyser_marche
-
+from scanner.deuxiememain import rechercher_voitures as rechercher_2ememain
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -127,7 +127,10 @@ async def internet(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔎 Analyse du marché en cours..."
     )
 
-    voitures = rechercher_voitures(modele)
+    voitures_autoscout = rechercher_voitures(modele)
+    voitures_2ememain = rechercher_2ememain(modele)
+    
+    voitures = voitures_autoscout + voitures_2ememain
 
     if len(voitures) == 0:
 
@@ -166,7 +169,8 @@ async def internet(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         texte += (
 
-            f"🚗 {voiture['modele']}\n\n"
+            f"🚗 {voiture['modele']}\n"
+            f"🌐 Source : {voiture.get('source', 'AutoScout24')}\n\n"
 
             f"💰 Prix affiché : {voiture['prix']}\n"
 
