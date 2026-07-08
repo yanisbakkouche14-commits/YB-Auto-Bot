@@ -14,13 +14,21 @@ def analyser_annonce(voiture):
             "score": 0,
             "benefice": 0,
             "prix_marche": "Inconnu",
-            "conseil": "Impossible d'analyser"
+            "conseil": "Impossible d'analyser",
+            "offre_depart": 0,
+            "prix_conseille": 0,
+            "prix_max": 0
         }
 
-    # Estimation très simple (on améliorera plus tard)
+    # Estimation provisoire du marché
     prix_marche = int(prix * 1.12)
 
     benefice = prix_marche - prix
+
+    # Calcul des prix de négociation
+    offre_depart = int(prix * 0.90)
+    prix_conseille = int(prix * 0.94)
+    prix_max = int(prix * 0.97)
 
     score = 50
     conseil = "Prix correct"
@@ -41,5 +49,8 @@ def analyser_annonce(voiture):
         "score": score,
         "benefice": benefice,
         "prix_marche": prix_marche,
-        "conseil": conseil
+        "conseil": conseil,
+        "offre_depart": offre_depart,
+        "prix_conseille": prix_conseille,
+        "prix_max": prix_max
     }

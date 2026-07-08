@@ -111,21 +111,31 @@ async def internet(update: Update, context: ContextTypes.DEFAULT_TYPE):
             kilometrage = kilometrage.get("value", "Inconnu")
 
         texte += (
-            f"🚗 {voiture['modele']}\n"
-            f"💰 Prix : {voiture['prix']}\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"🚗 {voiture['modele']}\n\n"
+
+            f"💰 Prix affiché : {voiture['prix']}\n"
             f"📍 Ville : {voiture['ville']}\n"
             f"📅 Année : {voiture.get('annee', 'Inconnue')}\n"
             f"🛣️ Kilométrage : {kilometrage} km\n"
             f"⛽ Carburant : {voiture.get('carburant', 'Inconnu')}\n"
             f"⚙️ Boîte : {voiture.get('boite', 'Inconnue')}\n\n"
-            f"📊 Prix estimé du marché : {analyse['prix_marche']} €\n"
+
+            f"📊 Valeur estimée : {analyse['prix_marche']} €\n\n"
+
+            f"🎯 Commence à négocier : {analyse['offre_depart']} €\n"
+            f"🤝 Prix conseillé : {analyse['prix_conseille']} €\n"
+            f"⛔ Ne dépasse jamais : {analyse['prix_max']} €\n\n"
+
             f"💵 Bénéfice estimé : +{analyse['benefice']} €\n"
             f"⭐ Score : {analyse['score']}/100\n"
             f"💡 Conseil : {analyse['conseil']}\n\n"
-            f"🔗 {voiture['lien']}\n\n"
+
+            f"🔗 {voiture['lien']}\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n\n"
         )
 
-    await update.message.reply_text(texte)
+    await update.message.reply_text(texte)   
 app = Application.builder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
@@ -134,9 +144,10 @@ app.add_handler(CommandHandler("sites", sites))
 app.add_handler(CommandHandler("recherche", recherche))
 app.add_handler(CommandHandler("internet", internet))
 
-print("=" * 40)
-print("🚗 YB AUTO BOT")
+print("=" * 50)
+print("🚗 YB AUTO BOT V2")
+print("🤖 Assistant d'achat / revente automobile")
 print("✅ Bot lancé avec succès !")
-print("=" * 40)
+print("=" * 50)
 
 app.run_polling()
