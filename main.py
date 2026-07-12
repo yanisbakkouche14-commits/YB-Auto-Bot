@@ -522,24 +522,29 @@ def planifier_scan(app):
     return True
 
 
-app = Application.builder().token(TOKEN).build()
+def main():
+    app = Application.builder().token(TOKEN).build()
 
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("aide", aide))
-app.add_handler(CommandHandler("sites", sites))
-app.add_handler(CommandHandler("recherche", recherche))
-app.add_handler(CommandHandler("internet", internet))
-app.add_handler(CommandHandler("surveille", surveille))
-app.add_handler(CommandHandler("surveillances", surveillances))
-app.add_handler(CommandHandler("stop_surveillance", stop_surveillance))
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("aide", aide))
+    app.add_handler(CommandHandler("sites", sites))
+    app.add_handler(CommandHandler("recherche", recherche))
+    app.add_handler(CommandHandler("internet", internet))
+    app.add_handler(CommandHandler("surveille", surveille))
+    app.add_handler(CommandHandler("surveillances", surveillances))
+    app.add_handler(CommandHandler("stop_surveillance", stop_surveillance))
 
-planifier_scan(app)
+    planifier_scan(app)
 
-print("=" * 60)
-print("🚗 YB AUTO BOT")
-print("🤖 Assistant intelligent d'achat / revente automobile")
-print("📊 Analyse du marché activée")
-print("✅ Bot lancé avec succès !")
-print("=" * 60)
+    print("=" * 60)
+    print("🚗 YB AUTO BOT")
+    print("🤖 Assistant intelligent d'achat / revente automobile")
+    print("📊 Analyse du marché activée")
+    print("✅ Bot lancé avec succès !")
+    print("=" * 60)
 
-app.run_polling()
+    app.run_polling()
+
+
+if __name__ == "__main__":
+    main()

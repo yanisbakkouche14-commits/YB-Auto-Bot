@@ -1,1 +1,9 @@
-TOKEN = "8985140255:AAF8sY7XLTDosf4OwQ9bSiNZl2NOdR5lj84"
+import os
+
+
+TOKEN = os.getenv("TELEGRAM_TOKEN") or os.getenv("TOKEN")
+
+if not TOKEN:
+    raise RuntimeError(
+        "Token Telegram manquant. Définissez TELEGRAM_TOKEN dans l'environnement."
+    )
