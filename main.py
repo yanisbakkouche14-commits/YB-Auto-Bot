@@ -15,6 +15,7 @@ from scanner.autoscout import rechercher_voitures
 from database.database import (
     ajouter_annonce,
     ajouter_surveillance,
+    analyser_pression_vendeur,
     bilan_business,
     enregistrer_message_business,
     enregistrer_statistiques_scan,
@@ -276,6 +277,79 @@ def formater_benefice(benefice):
     return f"+{formater_prix(benefice)}"
 
 
+def formater_infos_vendeur_presse(infos):
+    if not infos:
+        return ""
+
+    return (
+        "\n\n📉 Historique prix\n"
+        f"- Baisses : {infos['nombre_baisses']}\n"
+        f"- Baisse totale : {formater_prix(infos['baisse_totale'])} "
+        f"({infos['baisse_pourcentage']}%)\n"
+        f"- Ancienneté : {infos['jours_depuis_detection']} jours\n"
+        f"- Vendeur pressé : {infos['score']}/100 "
+        f"({infos['verdict']})"
+    )
+
+
+def formater_alerte_prix(infos):
+    annonce = infos["annonce"]
+
+    return (
+        "📉 ALERTE PRIX / VENDEUR\n\n"
+        f"🚗 {annonce.get('modele') or annonce.get('titre')}\n"
+        f"💰 Prix initial : {formater_prix(infos['prix_initial'])}\n"
+        f"💰 Prix actuel : {formater_prix(infos['prix_actuel'])}\n"
+        f"📉 Baisse totale : {formater_prix(infos['baisse_totale'])} "
+        f"({infos['baisse_pourcentage']}%)\n"
+        f"🔁 Nombre de baisses : {infos['nombre_baisses']}\n"
+        f"⏳ Ancienneté : {infos['jours_depuis_detection']} jours\n"
+        f"🎯 Score vendeur pressé : {infos['score']}/100\n"
+        f"🧭 Verdict : {infos['verdict']}\n\n"
+        f"💬 Conseil : {infos['conseil']}\n\n"
+        f"🔗 {annonce.get('lien')}"
+    )
+
+
+def formater_historique(infos):
+    if infos is None:
+        return "❌ Aucune annonce trouvée pour cet identifiant ou ce lien."
+
+    annonce = infos["annonce"]
+    lignes_historique = []
+
+    for changement in infos["historique"]:
+        sens = "baisse" if changement["variation"] < 0 else "hausse"
+        lignes_historique.append(
+            f"- {changement['date_changement']} : "
+            f"{formater_prix(changement['ancien_prix'])} → "
+            f"{formater_prix(changement['nouveau_prix'])} "
+            f"({sens} {formater_prix(abs(changement['variation']))})"
+        )
+
+    if not lignes_historique:
+        lignes_historique.append("- Aucun changement de prix enregistré.")
+
+    return (
+        "📉 HISTORIQUE PRIX\n\n"
+        f"🚗 {annonce.get('modele') or annonce.get('titre')}\n"
+        f"🔗 {annonce.get('lien')}\n\n"
+        f"💰 Prix initial : {formater_prix(infos['prix_initial'])}\n"
+        f"💰 Prix actuel : {formater_prix(infos['prix_actuel'])}\n\n"
+        "📋 Changements :\n"
+        + "\n".join(lignes_historique)
+        + "\n\n"
+        f"📉 Baisse totale : {formater_prix(infos['baisse_totale'])} "
+        f"({infos['baisse_pourcentage']}%)\n"
+        f"🔁 Nombre de baisses : {infos['nombre_baisses']}\n"
+        f"⏳ Depuis première détection : "
+        f"{infos['jours_depuis_detection']} jours\n"
+        f"🎯 Score vendeur pressé : {infos['score']}/100\n"
+        f"🧭 Verdict : {infos['verdict']}\n\n"
+        f"💬 Conseil : {infos['conseil']}"
+    )
+
+
 def generer_message_business(chat_id, date_jour=None):
     date_jour = date_jour or date_locale_bruxelles()
     date_hier = date_jour - timedelta(days=1)
@@ -464,12 +538,28 @@ def analyser_et_enregistrer(voitures, filtres=None):
             analyse["benefice"]
         )
 
+        infos_vendeur = analyser_pression_vendeur(voiture["lien"])
+
         if est_nouvelle and respecte_filtres(voiture, analyse, filtres):
             alertes.append({
                 "voiture": voiture,
                 "analyse": analyse,
                 "kilometrage": kilometrage,
-                "texte": formater_alerte(voiture, analyse, kilometrage)
+                "texte": (
+                    formater_alerte(voiture, analyse, kilometrage)
+                    + formater_infos_vendeur_presse(infos_vendeur)
+                )
+            })
+        elif (
+            not est_nouvelle
+            and infos_vendeur
+            and infos_vendeur["alerte_speciale"]
+        ):
+            alertes.append({
+                "voiture": voiture,
+                "analyse": analyse,
+                "kilometrage": kilometrage,
+                "texte": formater_alerte_prix(infos_vendeur)
             })
 
         bloc = (
@@ -974,6 +1064,19 @@ async def business(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def historique(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if len(context.args) == 0:
+        await update.message.reply_text(
+            "❌ Utilisation : /historique <lien ou identifiant>"
+        )
+        return
+
+    identifiant = " ".join(context.args).strip()
+    await update.message.reply_text(
+        formater_historique(analyser_pression_vendeur(identifiant))
+    )
+
+
 async def envoyer_messages_business(context: ContextTypes.DEFAULT_TYPE):
     date_envoi = date_locale_bruxelles()
 
@@ -1044,6 +1147,7 @@ def main():
     app.add_handler(CommandHandler("surveillances", surveillances))
     app.add_handler(CommandHandler("stop_surveillance", stop_surveillance))
     app.add_handler(CommandHandler("business", business))
+    app.add_handler(CommandHandler("historique", historique))
     app.add_error_handler(gerer_erreur_telegram)
 
     planifier_scan(app)

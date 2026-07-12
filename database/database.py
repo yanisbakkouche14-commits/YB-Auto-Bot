@@ -57,6 +57,8 @@ _ajouter_colonne_si_absente("annee", "TEXT")
 _ajouter_colonne_si_absente("date_premiere_detection", "TEXT")
 _ajouter_colonne_si_absente("score", "INTEGER")
 _ajouter_colonne_si_absente("benefice", "INTEGER")
+_ajouter_colonne_si_absente("prix_initial", "INTEGER")
+_ajouter_colonne_si_absente("date_derniere_detection", "TEXT")
 
 curseur.execute("""
 CREATE TABLE IF NOT EXISTS surveillances (
@@ -99,6 +101,17 @@ CREATE TABLE IF NOT EXISTS statistiques_scans (
     meilleur_modele TEXT,
     meilleur_benefice INTEGER,
     date_scan TEXT NOT NULL
+)
+""")
+
+curseur.execute("""
+CREATE TABLE IF NOT EXISTS historique_prix (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    lien TEXT NOT NULL,
+    ancien_prix INTEGER NOT NULL,
+    nouveau_prix INTEGER NOT NULL,
+    variation INTEGER NOT NULL,
+    date_changement TEXT NOT NULL
 )
 """)
 
@@ -301,6 +314,23 @@ def _migrer_table_surveillances_si_necessaire():
 
 _migrer_table_surveillances_si_necessaire()
 
+curseur.execute(
+    """
+    UPDATE annonces
+    SET prix_initial = prix
+    WHERE prix_initial IS NULL AND prix IS NOT NULL
+    """
+)
+curseur.execute(
+    """
+    UPDATE annonces
+    SET date_derniere_detection = date_premiere_detection
+    WHERE date_derniere_detection IS NULL
+    AND date_premiere_detection IS NOT NULL
+    """
+)
+connexion.commit()
+
 
 def annonce_existe(lien):
     curseur.execute(
@@ -308,6 +338,232 @@ def annonce_existe(lien):
         (lien,)
     )
     return curseur.fetchone() is not None
+
+
+def recuperer_annonce(identifiant):
+    if str(identifiant).isdigit():
+        curseur.execute(
+            """
+            SELECT *
+            FROM annonces
+            WHERE id = ?
+            """,
+            (int(identifiant),)
+        )
+    else:
+        curseur.execute(
+            """
+            SELECT *
+            FROM annonces
+            WHERE lien = ?
+            """,
+            (identifiant,)
+        )
+
+    ligne = curseur.fetchone()
+
+    if ligne is None:
+        return None
+
+    colonnes = [description[0] for description in curseur.description]
+    return dict(zip(colonnes, ligne))
+
+
+def _prix_numerique(prix):
+    if isinstance(prix, int):
+        return prix
+
+    if prix is None:
+        return None
+
+    chiffres = "".join(caractere for caractere in str(prix) if caractere.isdigit())
+
+    if not chiffres:
+        return None
+
+    return int(chiffres)
+
+
+def _date_iso_maintenant():
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def _jours_depuis(date_iso):
+    if not date_iso:
+        return 0
+
+    try:
+        date_detection = datetime.fromisoformat(str(date_iso))
+    except ValueError:
+        return 0
+
+    jours = (datetime.now() - date_detection).days
+    return max(jours, 0)
+
+
+def _texte_annonce(annonce):
+    return " ".join(
+        str(annonce.get(cle) or "")
+        for cle in ("titre", "modele")
+    ).lower()
+
+
+def _score_mots_cles(annonce):
+    texte = _texte_annonce(annonce)
+    mots_cles = (
+        "urgent",
+        "à débattre",
+        "a debattre",
+        "départ",
+        "depart",
+        "besoin d’argent",
+        "besoin d'argent",
+        "prix à discuter",
+        "prix a discuter",
+        "premier arrivé",
+        "premier arrive",
+    )
+
+    return 15 if any(mot in texte for mot in mots_cles) else 0
+
+
+def _verdict_vendeur_presse(score):
+    if score >= 70:
+        return "vendeur probablement pressé"
+
+    if score >= 40:
+        return "probablement négociable"
+
+    return "peu pressé"
+
+
+def _conseil_negociation(score, baisse_totale, nombre_baisses):
+    if score >= 70:
+        return (
+            "Prépare une offre ferme sous le prix affiché en rappelant "
+            "les baisses déjà observées."
+        )
+
+    if score >= 40 or nombre_baisses > 0:
+        return (
+            "Tente une négociation mesurée, surtout si l'annonce reste active."
+        )
+
+    return "Reste prudent : peu de signes de pression vendeur pour l'instant."
+
+
+def historique_prix(lien):
+    curseur.execute(
+        """
+        SELECT ancien_prix, nouveau_prix, variation, date_changement
+        FROM historique_prix
+        WHERE lien = ?
+        ORDER BY date_changement ASC, id ASC
+        """,
+        (lien,)
+    )
+    return [
+        {
+            "ancien_prix": ligne[0],
+            "nouveau_prix": ligne[1],
+            "variation": ligne[2],
+            "date_changement": ligne[3],
+        }
+        for ligne in curseur.fetchall()
+    ]
+
+
+def analyser_pression_vendeur(identifiant):
+    annonce = recuperer_annonce(identifiant)
+
+    if annonce is None:
+        return None
+
+    historique = historique_prix(annonce["lien"])
+    baisses = [ligne for ligne in historique if ligne["variation"] < 0]
+    prix_initial = annonce.get("prix_initial") or annonce.get("prix")
+    prix_actuel = annonce.get("prix")
+    baisse_totale = sum(abs(ligne["variation"]) for ligne in baisses)
+    nombre_baisses = len(baisses)
+    jours = _jours_depuis(annonce.get("date_premiere_detection"))
+
+    if prix_initial:
+        baisse_pourcentage = round((baisse_totale / prix_initial) * 100, 2)
+    else:
+        baisse_pourcentage = 0
+
+    score_baisses = min(nombre_baisses * 15, 30)
+    score_importance = min(baisse_pourcentage * 1.2, 30)
+    score_frequence = 0
+
+    if nombre_baisses:
+        score_frequence = min((nombre_baisses / max(jours, 1)) * 100, 20)
+
+    if jours > 20:
+        score_anciennete = 15
+    elif jours >= 8:
+        score_anciennete = 10
+    elif jours >= 3:
+        score_anciennete = 5
+    else:
+        score_anciennete = 0
+
+    score = int(round(min(
+        score_baisses
+        + score_importance
+        + score_frequence
+        + score_anciennete
+        + _score_mots_cles(annonce),
+        100
+    )))
+
+    return {
+        "annonce": annonce,
+        "historique": historique,
+        "baisses": baisses,
+        "prix_initial": prix_initial,
+        "prix_actuel": prix_actuel,
+        "nombre_baisses": nombre_baisses,
+        "baisse_totale": baisse_totale,
+        "baisse_pourcentage": baisse_pourcentage,
+        "jours_depuis_detection": jours,
+        "score": score,
+        "verdict": _verdict_vendeur_presse(score),
+        "conseil": _conseil_negociation(score, baisse_totale, nombre_baisses),
+        "alerte_speciale": (
+            baisse_totale >= 1000
+            or nombre_baisses >= 2
+            or score >= 70
+        ),
+    }
+
+
+def _enregistrer_changement_prix(lien, ancien_prix, nouveau_prix):
+    variation = nouveau_prix - ancien_prix
+
+    if variation == 0:
+        return False
+
+    curseur.execute(
+        """
+        INSERT INTO historique_prix (
+            lien,
+            ancien_prix,
+            nouveau_prix,
+            variation,
+            date_changement
+        )
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            lien,
+            ancien_prix,
+            nouveau_prix,
+            variation,
+            _date_iso_maintenant()
+        )
+    )
+    return True
 
 
 def mettre_a_jour_analyse_annonce(lien, score, benefice):
@@ -350,7 +606,27 @@ def ajouter_annonce(*args):
             "ou 6 arguments: source, modele, prix, kilometrage, annee, lien"
         )
 
-    if annonce_existe(lien):
+    prix = _prix_numerique(prix)
+    maintenant = _date_iso_maintenant()
+
+    annonce_connue = recuperer_annonce(lien)
+
+    if annonce_connue is not None:
+        ancien_prix = _prix_numerique(annonce_connue.get("prix"))
+
+        if ancien_prix is not None and prix is not None:
+            _enregistrer_changement_prix(lien, ancien_prix, prix)
+
+        curseur.execute(
+            """
+            UPDATE annonces
+            SET prix = ?,
+                date_derniere_detection = ?
+            WHERE lien = ?
+            """,
+            (prix, maintenant, lien)
+        )
+        connexion.commit()
         return False
 
     curseur.execute(
@@ -364,9 +640,11 @@ def ajouter_annonce(*args):
             modele,
             kilometrage,
             annee,
-            date_premiere_detection
+            date_premiere_detection,
+            prix_initial,
+            date_derniere_detection
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             titre,
@@ -377,7 +655,9 @@ def ajouter_annonce(*args):
             modele,
             _normaliser_kilometrage(kilometrage),
             str(annee),
-            datetime.now().isoformat(timespec="seconds")
+            maintenant,
+            prix,
+            maintenant
         )
     )
 
