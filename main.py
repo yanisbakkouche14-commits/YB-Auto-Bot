@@ -8,9 +8,21 @@ import time as time_module
 from pathlib import Path
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
-from telegram import Update
+from telegram import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    ReplyKeyboardMarkup,
+    Update,
+)
 from telegram.error import Conflict
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 from config import TOKEN
 
 from scanner.autoscout import rechercher_voitures
@@ -131,6 +143,138 @@ PHRASES_BUSINESS = [
     "Le suivi quotidien transforme le marché en terrain connu.",
     "Le vrai levier, c'est d'acheter quand la marge est déjà visible.",
 ]
+
+
+MENU_PRINCIPAL_BOUTONS = [
+    ["🔥 Scanner Business", "⭐ Opportunités"],
+    ["❤️ Favoris", "📊 Tableau de bord"],
+    ["⚙️ Paramètres", "ℹ️ Aide"],
+]
+
+
+def clavier_principal():
+    return ReplyKeyboardMarkup(
+        MENU_PRINCIPAL_BOUTONS,
+        resize_keyboard=True
+    )
+
+
+def clavier_retour_accueil():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🏠 Accueil", callback_data="menu:home")]
+    ])
+
+
+def clavier_scanner_business():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Activer", callback_data="scanner:enable"),
+            InlineKeyboardButton("🛑 Désactiver", callback_data="scanner:disable"),
+        ],
+        [
+            InlineKeyboardButton("📌 Statut", callback_data="scanner:status"),
+            InlineKeyboardButton("🚀 Lancer un scan", callback_data="scanner:run"),
+        ],
+        [InlineKeyboardButton("⚙️ Paramètres", callback_data="scanner:settings")],
+        [InlineKeyboardButton("🏠 Accueil", callback_data="menu:home")],
+    ])
+
+
+def clavier_opportunites():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🏆 Top 10 aujourd'hui", callback_data="opp:top_today")],
+        [InlineKeyboardButton("🚨 Dernières alertes", callback_data="opp:last_alerts")],
+        [InlineKeyboardButton("⏳ Vendeurs pressés", callback_data="opp:urgent_sellers")],
+        [InlineKeyboardButton("📉 Baisses de prix", callback_data="opp:price_drops")],
+        [InlineKeyboardButton("🏠 Accueil", callback_data="menu:home")],
+    ])
+
+
+def clavier_favoris():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("❤️ Voir les favoris", callback_data="fav:list")],
+        [InlineKeyboardButton("🗑️ Supprimer un favori", callback_data="fav:delete")],
+        [InlineKeyboardButton("🏠 Accueil", callback_data="menu:home")],
+    ])
+
+
+def clavier_tableau_de_bord():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📊 Actualiser", callback_data="dash:summary")],
+        [InlineKeyboardButton("🏠 Accueil", callback_data="menu:home")],
+    ])
+
+
+def clavier_parametres():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("💰 Budget maximum", callback_data="settings:budget")],
+        [InlineKeyboardButton("⭐ Score minimum", callback_data="settings:score")],
+        [InlineKeyboardButton("💵 Bénéfice minimum", callback_data="settings:benefit")],
+        [InlineKeyboardButton("🌍 Pays", callback_data="settings:country")],
+        [InlineKeyboardButton("⏱️ Fréquence du scan", callback_data="settings:frequency")],
+        [InlineKeyboardButton("🏠 Accueil", callback_data="menu:home")],
+    ])
+
+
+def clavier_aide():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⭐ Explication des scores", callback_data="help:scores")],
+        [InlineKeyboardButton("🔥 Business Score", callback_data="help:business_score")],
+        [InlineKeyboardButton("❓ FAQ", callback_data="help:faq")],
+        [InlineKeyboardButton("🏠 Accueil", callback_data="menu:home")],
+    ])
+
+
+def texte_accueil():
+    return (
+        "🏠 Accueil\n\n"
+        "Bienvenue sur YB Auto Bot.\n"
+        "Utilise les boutons pour scanner le marché, suivre les opportunités "
+        "et piloter tes alertes."
+    )
+
+
+def texte_scanner_business():
+    return (
+        "🔥 Scanner Business\n\n"
+        "Le scanner global analyse automatiquement un lot de véhicules "
+        "rentables toutes les 2 heures."
+    )
+
+
+def texte_opportunites():
+    return (
+        "⭐ Opportunités\n\n"
+        "Retrouve ici les meilleures annonces, les alertes récentes, "
+        "les vendeurs pressés et les baisses de prix."
+    )
+
+
+def texte_favoris():
+    return (
+        "❤️ Favoris\n\n"
+        "La gestion complète des favoris arrive dans une prochaine étape. "
+        "Les commandes historiques restent disponibles."
+    )
+
+
+def texte_parametres():
+    return (
+        "⚙️ Paramètres\n\n"
+        f"Budget global actuel : {formater_prix(PRIX_MAX_GLOBAL)}\n"
+        "Score minimum global : 80/100\n"
+        "Bénéfice minimum global : 2 000 €\n"
+        "Pays : Belgique\n"
+        "Fréquence scanner global : toutes les 2 heures"
+    )
+
+
+def texte_aide():
+    return (
+        "ℹ️ Aide\n\n"
+        "Choisis une rubrique pour comprendre les scores, le Business Score "
+        "ou les questions fréquentes."
+    )
 
 
 logging.basicConfig(
@@ -1466,6 +1610,262 @@ async def scan_global_business(context: ContextTypes.DEFAULT_TYPE):
         scan_global_en_cours = False
 
 
+async def executer_scan_global_pour_scanners(context, scanners_actifs):
+    debut_scan = time_module.monotonic()
+
+    try:
+        for scanner in scanners_actifs:
+            chat_id = scanner["chat_id"]
+            prix_max = scanner["prix_max"] or PRIX_MAX_GLOBAL
+            index_lot = scanner["prochain_lot_index"] % len(LOTS_VEHICULES_BUSINESS)
+            nom_lot, vehicules = LOTS_VEHICULES_BUSINESS[index_lot]
+            voitures = []
+            erreurs = []
+
+            for recherche in vehicules:
+                voitures_recherche, erreurs_recherche = scanner_recherche_global(
+                    recherche
+                )
+                voitures.extend(voitures_recherche)
+                erreurs.extend(erreurs_recherche)
+
+            voitures = dedupliquer_annonces_par_lien(voitures)
+            opportunites = analyser_scan_global(voitures, prix_max)
+            opportunites = opportunites_globales_non_envoyees(
+                chat_id,
+                opportunites
+            )[:MAX_OPPORTUNITES_SCAN_GLOBAL]
+
+            if opportunites:
+                message = formater_resume_scanner_global(
+                    nom_lot,
+                    opportunites,
+                    erreurs
+                )
+
+                for morceau in decouper_messages([message], limite=3900):
+                    await context.bot.send_message(
+                        chat_id=chat_id,
+                        text=morceau
+                    )
+
+                for opportunite in opportunites:
+                    infos_vendeur = opportunite["infos_vendeur"]
+                    baisse_totale = (
+                        infos_vendeur["baisse_totale"]
+                        if infos_vendeur else 0
+                    )
+                    enregistrer_opportunite_globale_envoyee(
+                        chat_id,
+                        opportunite["voiture"]["lien"],
+                        opportunite["prix"],
+                        opportunite["score_business"],
+                        baisse_totale,
+                        opportunite["signature"]
+                    )
+
+            avancer_lot_scanner_global(
+                chat_id,
+                len(LOTS_VEHICULES_BUSINESS)
+            )
+
+    finally:
+        duree = time_module.monotonic() - debut_scan
+        logger.info("Scan global terminé en %.2fs", duree)
+
+
+async def executer_scan_global_avec_verrou(context, scanners_actifs):
+    global scan_global_en_cours
+
+    if scan_global_en_cours:
+        return False
+
+    scan_global_en_cours = True
+
+    try:
+        await executer_scan_global_pour_scanners(context, scanners_actifs)
+        return True
+    finally:
+        scan_global_en_cours = False
+
+
+async def scan_global_business(context: ContextTypes.DEFAULT_TYPE):
+    scanners_actifs = lister_scanners_globaux_actifs()
+    lancement = await executer_scan_global_avec_verrou(context, scanners_actifs)
+
+    if not lancement:
+        logger.info("Scan global déjà en cours, passage ignoré.")
+
+
+async def lancer_scan_global_pour_chat(chat_id, bot):
+    statut = statut_scanner_global(chat_id)
+
+    if not statut or not statut["actif"]:
+        return "inactive"
+
+    contexte = type("ScanGlobalContext", (), {"bot": bot})()
+    lancement = await executer_scan_global_avec_verrou(
+        contexte,
+        [{
+            "chat_id": chat_id,
+            "prix_max": statut["prix_max"],
+            "prochain_lot_index": statut["prochain_lot_index"],
+        }]
+    )
+
+    return "started" if lancement else "busy"
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        texte_accueil(),
+        reply_markup=clavier_principal()
+    )
+
+
+async def afficher_menu_callback(query, texte, clavier):
+    await query.edit_message_text(
+        text=texte,
+        reply_markup=clavier
+    )
+
+
+def generer_statut_scanner_global(chat_id):
+    statut = statut_scanner_global(chat_id)
+
+    if not statut or not statut["actif"]:
+        return "Scanner Business global : inactif."
+
+    nom_lot, vehicules = LOTS_VEHICULES_BUSINESS[
+        statut["prochain_lot_index"] % len(LOTS_VEHICULES_BUSINESS)
+    ]
+    return (
+        "Scanner Business global : actif.\n"
+        f"Prochain lot : {nom_lot.replace('_', ' ')} "
+        f"({len(vehicules)} recherches)\n"
+        f"Prix maximum : {formater_prix(statut['prix_max'] or PRIX_MAX_GLOBAL)}"
+    )
+
+
+def generer_tableau_de_bord(chat_id):
+    statut = statut_scanner_global(chat_id)
+    actif = "oui" if statut and statut["actif"] else "non"
+
+    return (
+        "📊 Tableau de bord\n\n"
+        "Opportunités trouvées : voir alertes reçues\n"
+        "Marge totale estimée : calcul détaillé à venir\n"
+        "Nombre d'annonces analysées : suivi actif via scans\n"
+        "Dernier scan : consulte les derniers messages d'alerte\n"
+        f"Scanner global actif : {actif}"
+    )
+
+
+async def interface_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    chat_id = query.message.chat_id
+
+    if data == "menu:home":
+        await afficher_menu_callback(query, texte_accueil(), clavier_retour_accueil())
+    elif data == "menu:scanner":
+        await afficher_menu_callback(query, texte_scanner_business(), clavier_scanner_business())
+    elif data == "menu:opportunities":
+        await afficher_menu_callback(query, texte_opportunites(), clavier_opportunites())
+    elif data == "menu:favorites":
+        await afficher_menu_callback(query, texte_favoris(), clavier_favoris())
+    elif data == "menu:dashboard":
+        await afficher_menu_callback(query, generer_tableau_de_bord(chat_id), clavier_tableau_de_bord())
+    elif data == "menu:settings":
+        await afficher_menu_callback(query, texte_parametres(), clavier_parametres())
+    elif data == "menu:help":
+        await afficher_menu_callback(query, texte_aide(), clavier_aide())
+    elif data == "scanner:enable":
+        texte = (
+            "✅ Scanner Business global activé."
+            if activer_scanner_global(chat_id, PRIX_MAX_GLOBAL)
+            else "ℹ️ Scanner Business global déjà actif."
+        )
+        await afficher_menu_callback(query, texte, clavier_scanner_business())
+    elif data == "scanner:disable":
+        texte = (
+            "🛑 Scanner Business global désactivé."
+            if desactiver_scanner_global(chat_id)
+            else "ℹ️ Scanner Business global déjà inactif."
+        )
+        await afficher_menu_callback(query, texte, clavier_scanner_business())
+    elif data == "scanner:status":
+        await afficher_menu_callback(query, generer_statut_scanner_global(chat_id), clavier_scanner_business())
+    elif data == "scanner:run":
+        if scan_global_en_cours:
+            await afficher_menu_callback(
+                query,
+                "⏳ Un scan est déjà en cours. Merci de patienter quelques minutes.",
+                clavier_scanner_business()
+            )
+            return
+
+        await afficher_menu_callback(
+            query,
+            "🚀 Scan global lancé. Les opportunités seront envoyées ici.",
+            clavier_scanner_business()
+        )
+        resultat = await lancer_scan_global_pour_chat(chat_id, context.bot)
+
+        if resultat == "busy":
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="⏳ Un scan est déjà en cours. Merci de patienter quelques minutes."
+            )
+        elif resultat == "inactive":
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="ℹ️ Active d'abord le Scanner Business global."
+            )
+    elif data == "scanner:settings":
+        await afficher_menu_callback(query, texte_parametres(), clavier_scanner_business())
+    elif data == "opp:top_today":
+        await afficher_menu_callback(query, "🏆 Top 10 aujourd'hui\n\nLes meilleures opportunités seront affichées ici à partir des alertes reçues.", clavier_opportunites())
+    elif data == "opp:last_alerts":
+        await afficher_menu_callback(query, "🚨 Dernières alertes\n\nLes alertes sont envoyées automatiquement dans cette conversation.", clavier_opportunites())
+    elif data == "opp:urgent_sellers":
+        await afficher_menu_callback(query, "⏳ Vendeurs pressés\n\nLe score vendeur pressé apparaît dans les alertes et dans /historique.", clavier_opportunites())
+    elif data == "opp:price_drops":
+        await afficher_menu_callback(query, "📉 Baisses de prix\n\nLes baisses importantes déclenchent une nouvelle alerte.", clavier_opportunites())
+    elif data == "fav:list":
+        await afficher_menu_callback(query, "❤️ Favoris\n\nAucun favori enregistré pour le moment.", clavier_favoris())
+    elif data == "fav:delete":
+        await afficher_menu_callback(query, "🗑️ Supprimer un favori\n\nLa suppression par bouton sera ajoutée avec la gestion complète des favoris.", clavier_favoris())
+    elif data == "dash:summary":
+        await afficher_menu_callback(query, generer_tableau_de_bord(chat_id), clavier_tableau_de_bord())
+    elif data.startswith("settings:"):
+        await afficher_menu_callback(query, "⚙️ Paramètres\n\nLes réglages personnalisés par bouton seront ajoutés à la prochaine étape.", clavier_parametres())
+    elif data == "help:scores":
+        await afficher_menu_callback(query, "⭐ Scores\n\nLe score IA évalue la qualité de l'annonce selon le prix, la marge et le contexte véhicule.", clavier_aide())
+    elif data == "help:business_score":
+        await afficher_menu_callback(query, "🔥 Business Score\n\n40% score IA, 30% bénéfice, 15% vendeur pressé, 10% baisse de prix, 5% budget accessible.", clavier_aide())
+    elif data == "help:faq":
+        await afficher_menu_callback(query, "❓ FAQ\n\nLes anciennes commandes restent disponibles, mais l'utilisation principale se fait maintenant avec les boutons.", clavier_aide())
+
+
+async def gerer_reply_keyboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    texte = (update.message.text or "").strip()
+
+    if texte == "🔥 Scanner Business":
+        await update.message.reply_text(texte_scanner_business(), reply_markup=clavier_scanner_business())
+    elif texte == "⭐ Opportunités":
+        await update.message.reply_text(texte_opportunites(), reply_markup=clavier_opportunites())
+    elif texte == "❤️ Favoris":
+        await update.message.reply_text(texte_favoris(), reply_markup=clavier_favoris())
+    elif texte == "📊 Tableau de bord":
+        await update.message.reply_text(generer_tableau_de_bord(update.effective_chat.id), reply_markup=clavier_tableau_de_bord())
+    elif texte == "⚙️ Paramètres":
+        await update.message.reply_text(texte_parametres(), reply_markup=clavier_parametres())
+    elif texte == "ℹ️ Aide":
+        await update.message.reply_text(texte_aide(), reply_markup=clavier_aide())
+
+
 def planifier_scan(app):
     job_queue = getattr(app, "job_queue", None)
 
@@ -1531,6 +1931,8 @@ def main():
         "statut_scanner_global",
         statut_scanner_global_commande
     ))
+    app.add_handler(CallbackQueryHandler(interface_callback))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, gerer_reply_keyboard))
     app.add_error_handler(gerer_erreur_telegram)
 
     planifier_scan(app)
