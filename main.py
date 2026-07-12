@@ -1,8 +1,11 @@
 from voitures import voitures
 import atexit
+import importlib.util
 import logging
 import os
 import tempfile
+import time as time_module
+from pathlib import Path
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 from telegram import Update
@@ -13,17 +16,25 @@ from config import TOKEN
 from scanner.autoscout import rechercher_voitures
 
 from database.database import (
+    activer_scanner_global,
     ajouter_annonce,
     ajouter_surveillance,
     analyser_pression_vendeur,
+    avancer_lot_scanner_global,
     bilan_business,
+    desactiver_scanner_global,
     enregistrer_message_business,
+    enregistrer_opportunite_globale_envoyee,
     enregistrer_statistiques_scan,
     formater_filtres,
     lister_chat_ids_surveillance,
+    lister_scanners_globaux_actifs,
     lister_surveillances,
     message_business_deja_envoye,
     mettre_a_jour_analyse_annonce,
+    opportunite_globale_deja_envoyee,
+    signature_opportunite_globale,
+    statut_scanner_global,
     supprimer_surveillance
 )
 
@@ -41,7 +52,11 @@ CHEMIN_VERROU_INSTANCE = os.getenv(
     "YB_AUTO_BOT_LOCK",
     os.path.join(tempfile.gettempdir(), "yb_auto_bot.lock")
 )
+CHEMIN_CONFIG_VEHICULES_BUSINESS = (
+    Path(__file__).resolve().parent / "config" / "vehicules_business.py"
+)
 scan_en_cours = False
+scan_global_en_cours = False
 FILTRES_SURVEILLANCE = {
     "prix_min",
     "prix_max",
@@ -61,6 +76,28 @@ FILTRES_NUMERIQUES = {
     "score_min",
     "benefice_min",
 }
+
+
+def charger_config_vehicules_business():
+    spec = importlib.util.spec_from_file_location(
+        "vehicules_business_config",
+        CHEMIN_CONFIG_VEHICULES_BUSINESS
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+CONFIG_VEHICULES_BUSINESS = charger_config_vehicules_business()
+VEHICULES_BUSINESS = CONFIG_VEHICULES_BUSINESS.VEHICULES_BUSINESS
+LOTS_VEHICULES_BUSINESS = list(VEHICULES_BUSINESS.items())
+PRIX_MAX_GLOBAL = CONFIG_VEHICULES_BUSINESS.PRIX_MAX_GLOBAL
+MAX_OPPORTUNITES_SCAN_GLOBAL = (
+    CONFIG_VEHICULES_BUSINESS.MAX_OPPORTUNITES_SCAN_GLOBAL
+)
+INTERVALLE_SCAN_GLOBAL_SECONDES = (
+    CONFIG_VEHICULES_BUSINESS.INTERVALLE_SCAN_GLOBAL_SECONDES
+)
 
 PHRASES_BUSINESS = [
     "La marge se construit avant l'achat, pas après la vente.",
@@ -505,6 +542,217 @@ def scanner_recherche(recherche):
         erreurs.append(f"2ememain : {e}")
 
     return voitures, erreurs
+
+
+def scanner_recherche_global(recherche):
+    voitures = []
+    erreurs = []
+
+    plateformes = (
+        ("AutoScout24", rechercher_voitures),
+        ("2ememain", rechercher_2ememain),
+    )
+
+    for nom_plateforme, fonction_recherche in plateformes:
+        debut = time_module.monotonic()
+
+        try:
+            voitures.extend(fonction_recherche(recherche))
+        except Exception as erreur:
+            erreurs.append(f"{nom_plateforme} / {recherche} : {erreur}")
+            logger.warning(
+                "Erreur scan global %s pour %s : %s",
+                nom_plateforme,
+                recherche,
+                erreur
+            )
+        finally:
+            duree = time_module.monotonic() - debut
+            logger.info(
+                "Scan global %s / %s terminé en %.2fs",
+                nom_plateforme,
+                recherche,
+                duree
+            )
+
+    return voitures, erreurs
+
+
+def dedupliquer_annonces_par_lien(voitures):
+    annonces = {}
+
+    for voiture in voitures:
+        lien = voiture.get("lien")
+
+        if not lien or lien in annonces:
+            continue
+
+        annonces[lien] = voiture
+
+    return list(annonces.values())
+
+
+def score_business_global(analyse, infos_vendeur, prix, prix_max):
+    score_ia = min(analyse["score"], 100) * 0.40
+    score_benefice = min(analyse["benefice"] / 5000, 1) * 100 * 0.30
+    score_vendeur = (infos_vendeur["score"] if infos_vendeur else 0) * 0.15
+    baisse_totale = infos_vendeur["baisse_totale"] if infos_vendeur else 0
+    score_baisse = min(baisse_totale / 3000, 1) * 100 * 0.10
+
+    if prix <= prix_max * 0.65:
+        score_budget = 100 * 0.05
+    elif prix <= prix_max:
+        score_budget = 50 * 0.05
+    else:
+        score_budget = 0
+
+    return int(round(
+        min(
+            score_ia
+            + score_benefice
+            + score_vendeur
+            + score_baisse
+            + score_budget,
+            100
+        )
+    ))
+
+
+def est_baisse_importante(infos_vendeur):
+    if not infos_vendeur:
+        return False
+
+    return (
+        infos_vendeur["baisse_totale"] >= 1000
+        or infos_vendeur["nombre_baisses"] >= 2
+    )
+
+
+def analyser_scan_global(voitures, prix_max):
+    opportunites = []
+
+    for voiture in dedupliquer_annonces_par_lien(voitures):
+        prix = extraire_nombre(voiture.get("prix"))
+
+        if prix is None or prix > prix_max:
+            continue
+
+        analyse = analyser_annonce(voiture)
+        est_nouvelle = ajouter_annonce(
+            voiture.get("source", "AutoScout24"),
+            voiture["modele"],
+            prix,
+            extraire_kilometrage(voiture),
+            voiture.get("annee", "Inconnu"),
+            voiture["lien"]
+        )
+        mettre_a_jour_analyse_annonce(
+            voiture["lien"],
+            analyse["score"],
+            analyse["benefice"]
+        )
+        infos_vendeur = analyser_pression_vendeur(voiture["lien"])
+
+        if analyse["score"] < 80 or analyse["benefice"] < 2000:
+            continue
+
+        if not est_nouvelle and not est_baisse_importante(infos_vendeur):
+            continue
+
+        score_business = score_business_global(
+            analyse,
+            infos_vendeur,
+            prix,
+            prix_max
+        )
+
+        opportunites.append({
+            "voiture": voiture,
+            "analyse": analyse,
+            "infos_vendeur": infos_vendeur,
+            "prix": prix,
+            "score_business": score_business,
+            "est_nouvelle": est_nouvelle,
+        })
+
+    return sorted(
+        opportunites,
+        key=lambda item: (
+            item["score_business"],
+            item["analyse"]["score"],
+            item["analyse"]["benefice"],
+            item["infos_vendeur"]["score"] if item["infos_vendeur"] else 0,
+            item["infos_vendeur"]["baisse_totale"] if item["infos_vendeur"] else 0,
+            -item["prix"],
+            item["infos_vendeur"]["jours_depuis_detection"]
+            if item["infos_vendeur"] else 0,
+        ),
+        reverse=True
+    )
+
+
+def opportunites_globales_non_envoyees(chat_id, opportunites):
+    nouvelles = []
+
+    for opportunite in opportunites:
+        infos_vendeur = opportunite["infos_vendeur"]
+        baisse_totale = infos_vendeur["baisse_totale"] if infos_vendeur else 0
+        signature = signature_opportunite_globale(
+            opportunite["voiture"]["lien"],
+            opportunite["prix"],
+            opportunite["score_business"],
+            baisse_totale
+        )
+
+        if opportunite_globale_deja_envoyee(
+            chat_id,
+            opportunite["voiture"]["lien"],
+            signature
+        ):
+            continue
+
+        opportunite["signature"] = signature
+        nouvelles.append(opportunite)
+
+    return nouvelles
+
+
+def formater_resume_scanner_global(nom_lot, opportunites, erreurs):
+    blocs = [
+        "🔥 TOP OPPORTUNITÉS DU MARCHÉ\n\n"
+        f"Lot scanné : {nom_lot.replace('_', ' ')}\n"
+        f"Opportunités retenues : {len(opportunites)}\n"
+    ]
+
+    if erreurs:
+        blocs.append(
+            "\n⚠️ Erreurs partielles :\n"
+            + "\n".join(f"- {erreur}" for erreur in erreurs[:5])
+            + "\n"
+        )
+
+    medailles = ["🥇", "🥈", "🥉"]
+
+    for index, opportunite in enumerate(opportunites, start=1):
+        voiture = opportunite["voiture"]
+        analyse = opportunite["analyse"]
+        infos_vendeur = opportunite["infos_vendeur"] or {}
+        medaille = medailles[index - 1] if index <= 3 else f"{index}."
+        baisse = infos_vendeur.get("baisse_totale", 0)
+        score_vendeur = infos_vendeur.get("score", 0)
+
+        blocs.append(
+            "\n"
+            f"{medaille} {voiture['modele']}\n"
+            f"💰 Prix : {formater_prix(opportunite['prix'])}\n"
+            f"💵 Bénéfice estimé : +{formater_prix(analyse['benefice'])}\n"
+            f"⭐ Score business : {opportunite['score_business']}/100\n"
+            f"📉 Baisse : {formater_prix(baisse)}\n"
+            f"⏳ Vendeur pressé : {score_vendeur}/100\n"
+            f"🔗 {voiture['lien']}\n"
+        )
+
+    return "".join(blocs)
 
 
 def analyser_et_enregistrer(voitures, filtres=None):
@@ -1077,6 +1325,56 @@ async def historique(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def scanner_global(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+
+    if activer_scanner_global(chat_id, PRIX_MAX_GLOBAL):
+        await update.message.reply_text(
+            "✅ Scanner Business global activé.\n"
+            "Un lot de véhicules sera analysé toutes les 2 heures."
+        )
+    else:
+        await update.message.reply_text(
+            "ℹ️ Scanner Business global déjà actif."
+        )
+
+
+async def stop_scanner_global(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+
+    if desactiver_scanner_global(chat_id):
+        await update.message.reply_text(
+            "🛑 Scanner Business global désactivé."
+        )
+    else:
+        await update.message.reply_text(
+            "ℹ️ Scanner Business global déjà inactif."
+        )
+
+
+async def statut_scanner_global_commande(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+    statut = statut_scanner_global(update.effective_chat.id)
+
+    if not statut or not statut["actif"]:
+        await update.message.reply_text(
+            "Scanner Business global : inactif."
+        )
+        return
+
+    nom_lot, vehicules = LOTS_VEHICULES_BUSINESS[
+        statut["prochain_lot_index"] % len(LOTS_VEHICULES_BUSINESS)
+    ]
+    await update.message.reply_text(
+        "Scanner Business global : actif.\n"
+        f"Prochain lot : {nom_lot.replace('_', ' ')} "
+        f"({len(vehicules)} recherches)\n"
+        f"Prix maximum : {formater_prix(statut['prix_max'] or PRIX_MAX_GLOBAL)}"
+    )
+
+
 async def envoyer_messages_business(context: ContextTypes.DEFAULT_TYPE):
     date_envoi = date_locale_bruxelles()
 
@@ -1092,6 +1390,80 @@ async def envoyer_messages_business(context: ContextTypes.DEFAULT_TYPE):
         )
 
         enregistrer_message_business(chat_id, date_envoi.isoformat())
+
+
+async def scan_global_business(context: ContextTypes.DEFAULT_TYPE):
+    global scan_global_en_cours
+
+    if scan_global_en_cours:
+        logger.info("Scan global déjà en cours, passage ignoré.")
+        return
+
+    scan_global_en_cours = True
+    debut_scan = time_module.monotonic()
+
+    try:
+        scanners_actifs = lister_scanners_globaux_actifs()
+
+        for scanner in scanners_actifs:
+            chat_id = scanner["chat_id"]
+            prix_max = scanner["prix_max"] or PRIX_MAX_GLOBAL
+            index_lot = scanner["prochain_lot_index"] % len(LOTS_VEHICULES_BUSINESS)
+            nom_lot, vehicules = LOTS_VEHICULES_BUSINESS[index_lot]
+            voitures = []
+            erreurs = []
+
+            for recherche in vehicules:
+                voitures_recherche, erreurs_recherche = scanner_recherche_global(
+                    recherche
+                )
+                voitures.extend(voitures_recherche)
+                erreurs.extend(erreurs_recherche)
+
+            voitures = dedupliquer_annonces_par_lien(voitures)
+            opportunites = analyser_scan_global(voitures, prix_max)
+            opportunites = opportunites_globales_non_envoyees(
+                chat_id,
+                opportunites
+            )[:MAX_OPPORTUNITES_SCAN_GLOBAL]
+
+            if opportunites:
+                message = formater_resume_scanner_global(
+                    nom_lot,
+                    opportunites,
+                    erreurs
+                )
+
+                for morceau in decouper_messages([message], limite=3900):
+                    await context.bot.send_message(
+                        chat_id=chat_id,
+                        text=morceau
+                    )
+
+                for opportunite in opportunites:
+                    infos_vendeur = opportunite["infos_vendeur"]
+                    baisse_totale = (
+                        infos_vendeur["baisse_totale"]
+                        if infos_vendeur else 0
+                    )
+                    enregistrer_opportunite_globale_envoyee(
+                        chat_id,
+                        opportunite["voiture"]["lien"],
+                        opportunite["prix"],
+                        opportunite["score_business"],
+                        baisse_totale,
+                        opportunite["signature"]
+                    )
+
+            avancer_lot_scanner_global(
+                chat_id,
+                len(LOTS_VEHICULES_BUSINESS)
+            )
+
+    finally:
+        duree = time_module.monotonic() - debut_scan
+        logger.info("Scan global terminé en %.2fs", duree)
+        scan_global_en_cours = False
 
 
 def planifier_scan(app):
@@ -1112,6 +1484,11 @@ def planifier_scan(app):
     job_queue.run_daily(
         envoyer_messages_business,
         time=HEURE_MESSAGE_BUSINESS
+    )
+    job_queue.run_repeating(
+        scan_global_business,
+        interval=INTERVALLE_SCAN_GLOBAL_SECONDES,
+        first=INTERVALLE_SCAN_GLOBAL_SECONDES
     )
     return True
 
@@ -1148,6 +1525,12 @@ def main():
     app.add_handler(CommandHandler("stop_surveillance", stop_surveillance))
     app.add_handler(CommandHandler("business", business))
     app.add_handler(CommandHandler("historique", historique))
+    app.add_handler(CommandHandler("scanner_global", scanner_global))
+    app.add_handler(CommandHandler("stop_scanner_global", stop_scanner_global))
+    app.add_handler(CommandHandler(
+        "statut_scanner_global",
+        statut_scanner_global_commande
+    ))
     app.add_error_handler(gerer_erreur_telegram)
 
     planifier_scan(app)

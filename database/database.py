@@ -115,6 +115,31 @@ CREATE TABLE IF NOT EXISTS historique_prix (
 )
 """)
 
+curseur.execute("""
+CREATE TABLE IF NOT EXISTS scanner_global (
+    chat_id INTEGER PRIMARY KEY,
+    actif INTEGER NOT NULL,
+    prix_max INTEGER,
+    prochain_lot_index INTEGER NOT NULL,
+    date_activation TEXT NOT NULL,
+    date_modification TEXT NOT NULL
+)
+""")
+
+curseur.execute("""
+CREATE TABLE IF NOT EXISTS opportunites_globales_envoyees (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL,
+    lien TEXT NOT NULL,
+    prix INTEGER,
+    score_business INTEGER,
+    baisse_totale INTEGER,
+    date_envoi TEXT NOT NULL,
+    signature TEXT NOT NULL,
+    UNIQUE(chat_id, lien, signature)
+)
+""")
+
 connexion.commit()
 
 
@@ -881,6 +906,187 @@ def enregistrer_message_business(chat_id, date_envoi):
                 chat_id,
                 str(date_envoi),
                 datetime.now().isoformat(timespec="seconds")
+            )
+        )
+        connexion.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+
+
+def activer_scanner_global(chat_id, prix_max=None):
+    maintenant = _date_iso_maintenant()
+
+    try:
+        curseur.execute(
+            """
+            INSERT INTO scanner_global (
+                chat_id,
+                actif,
+                prix_max,
+                prochain_lot_index,
+                date_activation,
+                date_modification
+            )
+            VALUES (?, 1, ?, 0, ?, ?)
+            """,
+            (chat_id, prix_max, maintenant, maintenant)
+        )
+        connexion.commit()
+        return True
+    except sqlite3.IntegrityError:
+        curseur.execute(
+            """
+            SELECT actif
+            FROM scanner_global
+            WHERE chat_id = ?
+            """,
+            (chat_id,)
+        )
+        ligne = curseur.fetchone()
+
+        if ligne and ligne[0] == 1:
+            return False
+
+        curseur.execute(
+            """
+            UPDATE scanner_global
+            SET actif = 1,
+                prix_max = ?,
+                date_activation = ?,
+                date_modification = ?
+            WHERE chat_id = ?
+            """,
+            (prix_max, maintenant, maintenant, chat_id)
+        )
+        connexion.commit()
+        return True
+
+
+def desactiver_scanner_global(chat_id):
+    curseur.execute(
+        """
+        UPDATE scanner_global
+        SET actif = 0,
+            date_modification = ?
+        WHERE chat_id = ? AND actif = 1
+        """,
+        (_date_iso_maintenant(), chat_id)
+    )
+    connexion.commit()
+    return curseur.rowcount > 0
+
+
+def statut_scanner_global(chat_id):
+    curseur.execute(
+        """
+        SELECT chat_id, actif, prix_max, prochain_lot_index,
+               date_activation, date_modification
+        FROM scanner_global
+        WHERE chat_id = ?
+        """,
+        (chat_id,)
+    )
+    ligne = curseur.fetchone()
+
+    if ligne is None:
+        return None
+
+    return {
+        "chat_id": ligne[0],
+        "actif": bool(ligne[1]),
+        "prix_max": ligne[2],
+        "prochain_lot_index": ligne[3],
+        "date_activation": ligne[4],
+        "date_modification": ligne[5],
+    }
+
+
+def lister_scanners_globaux_actifs():
+    curseur.execute(
+        """
+        SELECT chat_id, prix_max, prochain_lot_index
+        FROM scanner_global
+        WHERE actif = 1
+        ORDER BY chat_id
+        """
+    )
+    return [
+        {
+            "chat_id": ligne[0],
+            "prix_max": ligne[1],
+            "prochain_lot_index": ligne[2],
+        }
+        for ligne in curseur.fetchall()
+    ]
+
+
+def avancer_lot_scanner_global(chat_id, nombre_lots):
+    statut = statut_scanner_global(chat_id)
+
+    if statut is None:
+        return 0
+
+    prochain_index = (statut["prochain_lot_index"] + 1) % nombre_lots
+    curseur.execute(
+        """
+        UPDATE scanner_global
+        SET prochain_lot_index = ?,
+            date_modification = ?
+        WHERE chat_id = ?
+        """,
+        (prochain_index, _date_iso_maintenant(), chat_id)
+    )
+    connexion.commit()
+    return prochain_index
+
+
+def signature_opportunite_globale(lien, prix, score_business, baisse_totale):
+    return f"{lien}|{prix}|{score_business}|{baisse_totale}"
+
+
+def opportunite_globale_deja_envoyee(chat_id, lien, signature):
+    curseur.execute(
+        """
+        SELECT 1
+        FROM opportunites_globales_envoyees
+        WHERE chat_id = ? AND lien = ? AND signature = ?
+        """,
+        (chat_id, lien, signature)
+    )
+    return curseur.fetchone() is not None
+
+
+def enregistrer_opportunite_globale_envoyee(
+    chat_id,
+    lien,
+    prix,
+    score_business,
+    baisse_totale,
+    signature
+):
+    try:
+        curseur.execute(
+            """
+            INSERT INTO opportunites_globales_envoyees (
+                chat_id,
+                lien,
+                prix,
+                score_business,
+                baisse_totale,
+                date_envoi,
+                signature
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                chat_id,
+                lien,
+                prix,
+                score_business,
+                baisse_totale,
+                _date_iso_maintenant(),
+                signature
             )
         )
         connexion.commit()
