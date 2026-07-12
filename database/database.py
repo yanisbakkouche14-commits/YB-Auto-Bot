@@ -8,6 +8,27 @@ DATABASE_PATH = os.getenv("YB_AUTO_BOT_DB", "voitures.db")
 connexion = sqlite3.connect(DATABASE_PATH)
 curseur = connexion.cursor()
 
+FILTRES_SURVEILLANCE = (
+    "prix_min",
+    "prix_max",
+    "km_max",
+    "annee_min",
+    "carburant",
+    "boite",
+    "score_min",
+    "benefice_min",
+    "source",
+)
+
+FILTRES_NUMERIQUES = {
+    "prix_min",
+    "prix_max",
+    "km_max",
+    "annee_min",
+    "score_min",
+    "benefice_min",
+}
+
 curseur.execute("""
 CREATE TABLE IF NOT EXISTS annonces (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -40,12 +61,219 @@ CREATE TABLE IF NOT EXISTS surveillances (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     recherche TEXT NOT NULL,
     chat_id INTEGER NOT NULL,
+    prix_min INTEGER,
+    prix_max INTEGER,
+    km_max INTEGER,
+    annee_min INTEGER,
+    carburant TEXT,
+    boite TEXT,
+    score_min INTEGER,
+    benefice_min INTEGER,
+    source TEXT,
+    filtres_signature TEXT NOT NULL,
     date_creation TEXT NOT NULL,
-    UNIQUE(recherche, chat_id)
+    UNIQUE(recherche, chat_id, filtres_signature)
 )
 """)
 
 connexion.commit()
+
+
+def _colonnes_table(nom_table):
+    curseur.execute(f"PRAGMA table_info({nom_table})")
+    return {colonne[1] for colonne in curseur.fetchall()}
+
+
+def _index_unique_surveillances_correct():
+    curseur.execute("PRAGMA index_list(surveillances)")
+    for index in curseur.fetchall():
+        est_unique = index[2]
+        nom_index = index[1]
+
+        if not est_unique:
+            continue
+
+        curseur.execute(f"PRAGMA index_info({nom_index})")
+        colonnes = [colonne[2] for colonne in curseur.fetchall()]
+
+        if colonnes == ["recherche", "chat_id", "filtres_signature"]:
+            return True
+
+    return False
+
+
+def _creer_table_surveillances():
+    curseur.execute("""
+    CREATE TABLE surveillances (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        recherche TEXT NOT NULL,
+        chat_id INTEGER NOT NULL,
+        prix_min INTEGER,
+        prix_max INTEGER,
+        km_max INTEGER,
+        annee_min INTEGER,
+        carburant TEXT,
+        boite TEXT,
+        score_min INTEGER,
+        benefice_min INTEGER,
+        source TEXT,
+        filtres_signature TEXT NOT NULL,
+        date_creation TEXT NOT NULL,
+        UNIQUE(recherche, chat_id, filtres_signature)
+    )
+    """)
+
+
+def normaliser_filtres(filtres=None):
+    filtres = filtres or {}
+    filtres_normalises = {}
+
+    for cle, valeur in filtres.items():
+        if valeur in (None, ""):
+            continue
+
+        if cle not in FILTRES_SURVEILLANCE:
+            continue
+
+        if cle in FILTRES_NUMERIQUES:
+            filtres_normalises[cle] = int(valeur)
+        else:
+            filtres_normalises[cle] = str(valeur).strip().lower()
+
+    return filtres_normalises
+
+
+def signature_filtres(filtres=None):
+    filtres_normalises = normaliser_filtres(filtres)
+    return "|".join(
+        f"{cle}={filtres_normalises[cle]}"
+        for cle in sorted(filtres_normalises)
+    )
+
+
+def formater_filtres(filtres=None):
+    filtres_normalises = normaliser_filtres(filtres)
+
+    if not filtres_normalises:
+        return "aucun filtre"
+
+    return ", ".join(
+        f"{cle}={filtres_normalises[cle]}"
+        for cle in sorted(filtres_normalises)
+    )
+
+
+def _migrer_table_surveillances_si_necessaire():
+    colonnes_attendues = {
+        "id",
+        "recherche",
+        "chat_id",
+        "prix_min",
+        "prix_max",
+        "km_max",
+        "annee_min",
+        "carburant",
+        "boite",
+        "score_min",
+        "benefice_min",
+        "source",
+        "filtres_signature",
+        "date_creation",
+    }
+
+    colonnes = _colonnes_table("surveillances")
+
+    if (
+        colonnes_attendues.issubset(colonnes)
+        and _index_unique_surveillances_correct()
+    ):
+        return
+
+    ancienne_table = "surveillances_avant_migration"
+    curseur.execute(f"DROP TABLE IF EXISTS {ancienne_table}")
+    curseur.execute(f"ALTER TABLE surveillances RENAME TO {ancienne_table}")
+    _creer_table_surveillances()
+
+    anciennes_colonnes = _colonnes_table(ancienne_table)
+    colonnes_communes = [
+        colonne
+        for colonne in colonnes_attendues
+        if colonne in anciennes_colonnes and colonne != "id"
+    ]
+
+    curseur.execute(f"SELECT * FROM {ancienne_table}")
+    lignes = curseur.fetchall()
+    noms_colonnes = [description[0] for description in curseur.description]
+
+    for ligne in lignes:
+        donnees = dict(zip(noms_colonnes, ligne))
+        filtres = {
+            cle: donnees.get(cle)
+            for cle in FILTRES_SURVEILLANCE
+            if cle in anciennes_colonnes
+        }
+        signature = donnees.get("filtres_signature") or signature_filtres(filtres)
+
+        valeurs = {
+            "recherche": donnees["recherche"],
+            "chat_id": donnees["chat_id"],
+            "prix_min": donnees.get("prix_min"),
+            "prix_max": donnees.get("prix_max"),
+            "km_max": donnees.get("km_max"),
+            "annee_min": donnees.get("annee_min"),
+            "carburant": donnees.get("carburant"),
+            "boite": donnees.get("boite"),
+            "score_min": donnees.get("score_min"),
+            "benefice_min": donnees.get("benefice_min"),
+            "source": donnees.get("source"),
+            "filtres_signature": signature,
+            "date_creation": donnees.get(
+                "date_creation",
+                datetime.now().isoformat(timespec="seconds")
+            ),
+        }
+
+        curseur.execute(
+            """
+            INSERT OR IGNORE INTO surveillances (
+                recherche,
+                chat_id,
+                prix_min,
+                prix_max,
+                km_max,
+                annee_min,
+                carburant,
+                boite,
+                score_min,
+                benefice_min,
+                source,
+                filtres_signature,
+                date_creation
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                valeurs["recherche"],
+                valeurs["chat_id"],
+                valeurs["prix_min"],
+                valeurs["prix_max"],
+                valeurs["km_max"],
+                valeurs["annee_min"],
+                valeurs["carburant"],
+                valeurs["boite"],
+                valeurs["score_min"],
+                valeurs["benefice_min"],
+                valeurs["source"],
+                valeurs["filtres_signature"],
+                valeurs["date_creation"],
+            )
+        )
+
+    curseur.execute(f"DROP TABLE {ancienne_table}")
+    connexion.commit()
+
+
+_migrer_table_surveillances_si_necessaire()
 
 
 def annonce_existe(lien):
@@ -119,8 +347,10 @@ def ajouter_annonce(*args):
     return True
 
 
-def ajouter_surveillance(recherche, chat_id):
+def ajouter_surveillance(recherche, chat_id, filtres=None):
     recherche = normaliser_recherche(recherche)
+    filtres_normalises = normaliser_filtres(filtres)
+    filtres_signature = signature_filtres(filtres_normalises)
 
     if not recherche:
         return False
@@ -128,12 +358,36 @@ def ajouter_surveillance(recherche, chat_id):
     try:
         curseur.execute(
             """
-            INSERT INTO surveillances (recherche, chat_id, date_creation)
-            VALUES (?, ?, ?)
+            INSERT INTO surveillances (
+                recherche,
+                chat_id,
+                prix_min,
+                prix_max,
+                km_max,
+                annee_min,
+                carburant,
+                boite,
+                score_min,
+                benefice_min,
+                source,
+                filtres_signature,
+                date_creation
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 recherche,
                 chat_id,
+                filtres_normalises.get("prix_min"),
+                filtres_normalises.get("prix_max"),
+                filtres_normalises.get("km_max"),
+                filtres_normalises.get("annee_min"),
+                filtres_normalises.get("carburant"),
+                filtres_normalises.get("boite"),
+                filtres_normalises.get("score_min"),
+                filtres_normalises.get("benefice_min"),
+                filtres_normalises.get("source"),
+                filtres_signature,
                 datetime.now().isoformat(timespec="seconds")
             )
         )
@@ -143,37 +397,53 @@ def ajouter_surveillance(recherche, chat_id):
         return False
 
 
-def supprimer_surveillance(recherche, chat_id):
+def supprimer_surveillance(recherche, chat_id, filtres=None):
     recherche = normaliser_recherche(recherche)
+    filtres_signature = signature_filtres(filtres)
     curseur.execute(
         """
         DELETE FROM surveillances
-        WHERE recherche = ? AND chat_id = ?
+        WHERE recherche = ? AND chat_id = ? AND filtres_signature = ?
         """,
-        (recherche, chat_id)
+        (recherche, chat_id, filtres_signature)
     )
     connexion.commit()
     return curseur.rowcount > 0
 
 
 def lister_surveillances(chat_id=None):
+    colonnes_filtres = ", ".join(FILTRES_SURVEILLANCE)
+
     if chat_id is None:
         curseur.execute(
-            """
-            SELECT recherche, chat_id
+            f"""
+            SELECT recherche, chat_id, {colonnes_filtres}
             FROM surveillances
-            ORDER BY recherche
+            ORDER BY recherche, filtres_signature
             """
         )
-        return curseur.fetchall()
+        return [
+            (
+                ligne[0],
+                ligne[1],
+                normaliser_filtres(dict(zip(FILTRES_SURVEILLANCE, ligne[2:])))
+            )
+            for ligne in curseur.fetchall()
+        ]
 
     curseur.execute(
-        """
-        SELECT recherche
+        f"""
+        SELECT recherche, {colonnes_filtres}
         FROM surveillances
         WHERE chat_id = ?
-        ORDER BY recherche
+        ORDER BY recherche, filtres_signature
         """,
         (chat_id,)
     )
-    return [ligne[0] for ligne in curseur.fetchall()]
+    return [
+        (
+            ligne[0],
+            normaliser_filtres(dict(zip(FILTRES_SURVEILLANCE, ligne[1:])))
+        )
+        for ligne in curseur.fetchall()
+    ]

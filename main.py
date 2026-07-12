@@ -8,6 +8,7 @@ from scanner.autoscout import rechercher_voitures
 from database.database import (
     ajouter_annonce,
     ajouter_surveillance,
+    formater_filtres,
     lister_surveillances,
     supprimer_surveillance
 )
@@ -21,6 +22,25 @@ SCORE_ALERTE_MINIMUM = 80
 BENEFICE_ALERTE_MINIMUM = 2500
 MAX_ALERTES_PAR_RECHERCHE = 5
 scan_en_cours = False
+FILTRES_SURVEILLANCE = {
+    "prix_min",
+    "prix_max",
+    "km_max",
+    "annee_min",
+    "carburant",
+    "boite",
+    "score_min",
+    "benefice_min",
+    "source",
+}
+FILTRES_NUMERIQUES = {
+    "prix_min",
+    "prix_max",
+    "km_max",
+    "annee_min",
+    "score_min",
+    "benefice_min",
+}
 
 
 def formater_prix(prix):
@@ -28,6 +48,80 @@ def formater_prix(prix):
         return f"{prix} €"
 
     return str(prix)
+
+
+def extraire_recherche_et_filtres(args):
+    position_premier_filtre = None
+
+    for index, argument in enumerate(args):
+        if "=" in argument:
+            position_premier_filtre = index
+            break
+
+    if position_premier_filtre is None:
+        recherche_args = args
+        filtre_args = []
+    else:
+        recherche_args = args[:position_premier_filtre]
+        filtre_args = args[position_premier_filtre:]
+
+    recherche = " ".join(recherche_args).strip()
+
+    if not recherche:
+        return None, None, "la recherche véhicule est obligatoire"
+
+    filtres = {}
+
+    for argument in filtre_args:
+        if "=" not in argument:
+            return None, None, f"filtre invalide : {argument}"
+
+        cle, valeur = argument.split("=", 1)
+        cle = cle.strip().lower()
+        valeur = valeur.strip()
+
+        if cle not in FILTRES_SURVEILLANCE:
+            return None, None, f"filtre inconnu : {cle}"
+
+        if not valeur:
+            return None, None, f"valeur manquante pour {cle}"
+
+        if cle in FILTRES_NUMERIQUES:
+            try:
+                valeur = int(valeur)
+            except ValueError:
+                return None, None, f"valeur numérique invalide pour {cle}"
+
+            if valeur < 0:
+                return None, None, f"valeur négative invalide pour {cle}"
+        else:
+            valeur = valeur.lower()
+
+        filtres[cle] = valeur
+
+    return recherche, filtres, None
+
+
+def extraire_nombre(valeur):
+    if isinstance(valeur, int):
+        return valeur
+
+    if isinstance(valeur, dict):
+        return extraire_nombre(valeur.get("value"))
+
+    if valeur is None:
+        return None
+
+    chiffres = "".join(caractere for caractere in str(valeur) if caractere.isdigit())
+
+    if not chiffres:
+        return None
+
+    return int(chiffres)
+
+
+def valeur_texte(voiture, cle, defaut=""):
+    return str(voiture.get(cle, defaut) or defaut).strip().lower()
 
 
 def decouper_messages(blocs, limite=3900):
@@ -77,10 +171,14 @@ def formater_alerte(voiture, analyse, kilometrage):
     )
 
 
-def est_bonne_affaire(analyse):
+def est_bonne_affaire(analyse, filtres=None):
+    filtres = filtres or {}
+    score_min = filtres.get("score_min", SCORE_ALERTE_MINIMUM)
+    benefice_min = filtres.get("benefice_min", BENEFICE_ALERTE_MINIMUM)
+
     return (
-        analyse["score"] >= SCORE_ALERTE_MINIMUM
-        and analyse["benefice"] >= BENEFICE_ALERTE_MINIMUM
+        analyse["score"] >= score_min
+        and analyse["benefice"] >= benefice_min
     )
 
 
@@ -94,6 +192,47 @@ def extraire_kilometrage(voiture):
         )
 
     return kilometrage
+
+
+def respecte_filtres(voiture, analyse, filtres=None):
+    filtres = filtres or {}
+    prix = extraire_nombre(voiture.get("prix"))
+    kilometrage = extraire_nombre(extraire_kilometrage(voiture))
+    annee = extraire_nombre(voiture.get("annee"))
+
+    if "prix_min" in filtres and (prix is None or prix < filtres["prix_min"]):
+        return False
+
+    if "prix_max" in filtres and (prix is None or prix > filtres["prix_max"]):
+        return False
+
+    if "km_max" in filtres and (
+        kilometrage is None or kilometrage > filtres["km_max"]
+    ):
+        return False
+
+    if "annee_min" in filtres and (
+        annee is None or annee < filtres["annee_min"]
+    ):
+        return False
+
+    if "carburant" in filtres:
+        carburant = valeur_texte(voiture, "carburant")
+        if filtres["carburant"] not in carburant:
+            return False
+
+    if "boite" in filtres:
+        boite = valeur_texte(voiture, "boite")
+        if filtres["boite"] not in boite:
+            return False
+
+    if "source" in filtres:
+        source = valeur_texte(voiture, "source")
+        filtre_source = filtres["source"]
+        if filtre_source not in source and source not in filtre_source:
+            return False
+
+    return est_bonne_affaire(analyse, filtres)
 
 
 def scanner_recherche(recherche):
@@ -113,7 +252,7 @@ def scanner_recherche(recherche):
     return voitures, erreurs
 
 
-def analyser_et_enregistrer(voitures):
+def analyser_et_enregistrer(voitures, filtres=None):
     annonces_analysees = []
     alertes = []
     nouvelles_annonces = 0
@@ -138,7 +277,7 @@ def analyser_et_enregistrer(voitures):
         else:
             annonces_connues += 1
 
-        if est_nouvelle and est_bonne_affaire(analyse):
+        if est_nouvelle and respecte_filtres(voiture, analyse, filtres):
             alertes.append({
                 "voiture": voiture,
                 "analyse": analyse,
@@ -492,6 +631,122 @@ async def scan_surveillances(context: ContextTypes.DEFAULT_TYPE):
                 continue
 
             resultat = analyser_et_enregistrer(voitures)
+            alertes = resultat["alertes"][:MAX_ALERTES_PAR_RECHERCHE]
+
+            for alerte in alertes:
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=alerte["texte"]
+                )
+
+    finally:
+        scan_en_cours = False
+
+
+async def surveille(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if len(context.args) == 0:
+        await update.message.reply_text(
+            "âŒ Utilisation : /surveille golf gti prix_max=22000"
+        )
+        return
+
+    recherche, filtres, erreur = extraire_recherche_et_filtres(context.args)
+
+    if erreur:
+        await update.message.reply_text(f"âŒ Filtre invalide : {erreur}")
+        return
+
+    chat_id = update.effective_chat.id
+
+    if ajouter_surveillance(recherche, chat_id, filtres):
+        await update.message.reply_text(
+            f"âœ… Surveillance ajoutÃ©e : {recherche.lower()}\n"
+            f"Filtres : {formater_filtres(filtres)}"
+        )
+    else:
+        await update.message.reply_text(
+            f"â„¹ï¸ Surveillance dÃ©jÃ  active : {recherche.lower()}\n"
+            f"Filtres : {formater_filtres(filtres)}"
+        )
+
+
+async def surveillances(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    recherches = lister_surveillances(update.effective_chat.id)
+
+    if not recherches:
+        await update.message.reply_text(
+            "Aucune recherche surveillÃ©e."
+        )
+        return
+
+    texte = "ðŸ”Ž Recherches surveillÃ©es\n\n"
+    texte += "\n".join(
+        f"- {recherche} ({formater_filtres(filtres)})"
+        for recherche, filtres in recherches
+    )
+
+    await update.message.reply_text(texte)
+
+
+async def stop_surveillance(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if len(context.args) == 0:
+        await update.message.reply_text(
+            "âŒ Utilisation : /stop_surveillance golf gti prix_max=22000"
+        )
+        return
+
+    recherche, filtres, erreur = extraire_recherche_et_filtres(context.args)
+
+    if erreur:
+        await update.message.reply_text(f"âŒ Filtre invalide : {erreur}")
+        return
+
+    chat_id = update.effective_chat.id
+
+    if supprimer_surveillance(recherche, chat_id, filtres):
+        await update.message.reply_text(
+            f"ðŸ›‘ Surveillance supprimÃ©e : {recherche.lower()}\n"
+            f"Filtres : {formater_filtres(filtres)}"
+        )
+    else:
+        await update.message.reply_text(
+            f"â„¹ï¸ Aucune surveillance trouvÃ©e : {recherche.lower()}\n"
+            f"Filtres : {formater_filtres(filtres)}"
+        )
+
+
+async def scan_surveillances(context: ContextTypes.DEFAULT_TYPE):
+
+    global scan_en_cours
+
+    if scan_en_cours:
+        print("Scan automatique dÃ©jÃ  en cours, passage ignorÃ©.")
+        return
+
+    scan_en_cours = True
+
+    try:
+        surveillances_actives = lister_surveillances()
+
+        for recherche, chat_id, filtres in surveillances_actives:
+            voitures, erreurs = scanner_recherche(recherche)
+
+            if not voitures:
+                if erreurs:
+                    await context.bot.send_message(
+                        chat_id=chat_id,
+                        text=(
+                            f"âš ï¸ Surveillance {recherche} "
+                            f"({formater_filtres(filtres)})\n"
+                            + "\n".join(erreurs)
+                        )
+                    )
+                continue
+
+            resultat = analyser_et_enregistrer(voitures, filtres)
             alertes = resultat["alertes"][:MAX_ALERTES_PAR_RECHERCHE]
 
             for alerte in alertes:
