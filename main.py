@@ -1,4 +1,6 @@
 from voitures import voitures
+from datetime import datetime, time, timedelta
+from zoneinfo import ZoneInfo
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from config import TOKEN
@@ -8,8 +10,14 @@ from scanner.autoscout import rechercher_voitures
 from database.database import (
     ajouter_annonce,
     ajouter_surveillance,
+    bilan_business,
+    enregistrer_message_business,
+    enregistrer_statistiques_scan,
     formater_filtres,
+    lister_chat_ids_surveillance,
     lister_surveillances,
+    message_business_deja_envoye,
+    mettre_a_jour_analyse_annonce,
     supprimer_surveillance
 )
 
@@ -21,6 +29,8 @@ from scanner.deuxiememain import rechercher_voitures as rechercher_2ememain
 SCORE_ALERTE_MINIMUM = 80
 BENEFICE_ALERTE_MINIMUM = 2500
 MAX_ALERTES_PAR_RECHERCHE = 5
+FUSEAU_HORAIRE = ZoneInfo("Europe/Brussels")
+HEURE_MESSAGE_BUSINESS = time(8, 0, tzinfo=FUSEAU_HORAIRE)
 scan_en_cours = False
 FILTRES_SURVEILLANCE = {
     "prix_min",
@@ -41,6 +51,39 @@ FILTRES_NUMERIQUES = {
     "score_min",
     "benefice_min",
 }
+
+PHRASES_BUSINESS = [
+    "La marge se construit avant l'achat, pas après la vente.",
+    "Chaque annonce analysée te rapproche d'une vraie opportunité.",
+    "La discipline bat l'intuition quand les chiffres sont bons.",
+    "Un bon deal commence par un prix d'achat maîtrisé.",
+    "Le marché récompense ceux qui comparent avant d'agir.",
+    "Acheter trop cher transforme une bonne voiture en mauvais business.",
+    "La patience est une stratégie quand elle protège ta marge.",
+    "Un refus intelligent vaut mieux qu'un achat émotionnel.",
+    "Le profit se cache souvent dans les annonces que les autres ignorent.",
+    "La régularité crée plus d'opportunités que les coups de chance.",
+    "Une bonne affaire doit survivre aux chiffres, pas seulement à l'envie.",
+    "Cherche la décote, protège la trésorerie, laisse parler la marge.",
+    "Le meilleur achat est celui que tu peux revendre sereinement.",
+    "Le volume d'analyse donne de la précision au jugement.",
+    "Une annonce moyenne au bon prix peut battre une belle annonce trop chère.",
+    "Le marché change vite, la méthode doit rester stable.",
+    "Les meilleures opportunités aiment les décisions préparées.",
+    "Un business solide commence par des critères clairs.",
+    "La donnée transforme une intuition en avantage.",
+    "Chaque scan est une négociation commencée en silence.",
+    "La marge minimale n'est pas un détail, c'est une protection.",
+    "Un prix bas n'est utile que si le risque est compris.",
+    "La vitesse compte, mais la lucidité compte davantage.",
+    "Les bons acheteurs savent attendre sans dormir.",
+    "Une opportunité ratée coûte moins cher qu'une mauvaise décision.",
+    "Les chiffres froids évitent les erreurs chaudes.",
+    "Un deal propre laisse de la place pour l'imprévu.",
+    "La meilleure annonce du jour est celle qui respecte tes règles.",
+    "Le suivi quotidien transforme le marché en terrain connu.",
+    "Le vrai levier, c'est d'acheter quand la marge est déjà visible.",
+]
 
 
 def formater_prix(prix):
@@ -122,6 +165,52 @@ def extraire_nombre(valeur):
 
 def valeur_texte(voiture, cle, defaut=""):
     return str(voiture.get(cle, defaut) or defaut).strip().lower()
+
+
+def date_locale_bruxelles():
+    return datetime.now(FUSEAU_HORAIRE).date()
+
+
+def phrase_business_du_jour(date_jour=None):
+    date_jour = date_jour or date_locale_bruxelles()
+    index = date_jour.toordinal() % len(PHRASES_BUSINESS)
+    return PHRASES_BUSINESS[index]
+
+
+def formater_benefice(benefice):
+    if benefice is None:
+        return "Inconnu"
+
+    return f"+{formater_prix(benefice)}"
+
+
+def generer_message_business(chat_id, date_jour=None):
+    date_jour = date_jour or date_locale_bruxelles()
+    date_hier = date_jour - timedelta(days=1)
+    bilan = bilan_business(date_hier.isoformat(), chat_id)
+
+    if bilan["annonces_analysees"] == 0:
+        meilleure_opportunite = "Aucune donnée disponible hier"
+    elif bilan["meilleur_modele"]:
+        meilleure_opportunite = (
+            f"{bilan['meilleur_modele']} "
+            f"{formater_benefice(bilan['meilleur_benefice'])}"
+        )
+    else:
+        meilleure_opportunite = "Aucune bonne affaire détectée"
+
+    return (
+        "☀️ Bonjour !\n\n"
+        "💬 Citation du jour :\n"
+        f"\"{phrase_business_du_jour(date_jour)}\"\n\n"
+        "📈 Bilan d'hier :\n"
+        f"- {bilan['annonces_analysees']} annonces analysées\n"
+        f"- {bilan['nouvelles_annonces']} nouvelles annonces\n"
+        f"- {bilan['bonnes_affaires']} bonnes affaires détectées\n"
+        f"- Meilleure opportunité : {meilleure_opportunite}\n\n"
+        "🎯 Objectif du jour :\n"
+        "Trouver au moins une annonce avec une marge supérieure à 2 500 €."
+    )
 
 
 def decouper_messages(blocs, limite=3900):
@@ -276,6 +365,12 @@ def analyser_et_enregistrer(voitures, filtres=None):
             nouvelles_annonces += 1
         else:
             annonces_connues += 1
+
+        mettre_a_jour_analyse_annonce(
+            voiture["lien"],
+            analyse["score"],
+            analyse["benefice"]
+        )
 
         if est_nouvelle and respecte_filtres(voiture, analyse, filtres):
             alertes.append({
@@ -747,7 +842,29 @@ async def scan_surveillances(context: ContextTypes.DEFAULT_TYPE):
                 continue
 
             resultat = analyser_et_enregistrer(voitures, filtres)
-            alertes = resultat["alertes"][:MAX_ALERTES_PAR_RECHERCHE]
+            toutes_les_alertes = resultat["alertes"]
+            meilleure_alerte = toutes_les_alertes[0] if toutes_les_alertes else None
+
+            enregistrer_statistiques_scan(
+                chat_id=chat_id,
+                recherche=recherche,
+                annonces_analysees=len(voitures),
+                nouvelles_annonces=resultat["nouvelles"],
+                bonnes_affaires=len(toutes_les_alertes),
+                meilleur_modele=(
+                    meilleure_alerte["voiture"]["modele"]
+                    if meilleure_alerte else None
+                ),
+                meilleur_benefice=(
+                    meilleure_alerte["analyse"]["benefice"]
+                    if meilleure_alerte else None
+                ),
+                date_scan=datetime.now(FUSEAU_HORAIRE).isoformat(
+                    timespec="seconds"
+                )
+            )
+
+            alertes = toutes_les_alertes[:MAX_ALERTES_PAR_RECHERCHE]
 
             for alerte in alertes:
                 await context.bot.send_message(
@@ -757,6 +874,29 @@ async def scan_surveillances(context: ContextTypes.DEFAULT_TYPE):
 
     finally:
         scan_en_cours = False
+
+
+async def business(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        generer_message_business(update.effective_chat.id)
+    )
+
+
+async def envoyer_messages_business(context: ContextTypes.DEFAULT_TYPE):
+    date_envoi = date_locale_bruxelles()
+
+    for chat_id in lister_chat_ids_surveillance():
+        if message_business_deja_envoye(chat_id, date_envoi.isoformat()):
+            continue
+
+        texte = generer_message_business(chat_id, date_envoi)
+
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=texte
+        )
+
+        enregistrer_message_business(chat_id, date_envoi.isoformat())
 
 
 def planifier_scan(app):
@@ -774,6 +914,10 @@ def planifier_scan(app):
         interval=3600,
         first=3600
     )
+    job_queue.run_daily(
+        envoyer_messages_business,
+        time=HEURE_MESSAGE_BUSINESS
+    )
     return True
 
 
@@ -788,6 +932,7 @@ def main():
     app.add_handler(CommandHandler("surveille", surveille))
     app.add_handler(CommandHandler("surveillances", surveillances))
     app.add_handler(CommandHandler("stop_surveillance", stop_surveillance))
+    app.add_handler(CommandHandler("business", business))
 
     planifier_scan(app)
 

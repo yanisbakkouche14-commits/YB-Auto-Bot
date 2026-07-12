@@ -55,6 +55,8 @@ _ajouter_colonne_si_absente("modele", "TEXT")
 _ajouter_colonne_si_absente("kilometrage", "INTEGER")
 _ajouter_colonne_si_absente("annee", "TEXT")
 _ajouter_colonne_si_absente("date_premiere_detection", "TEXT")
+_ajouter_colonne_si_absente("score", "INTEGER")
+_ajouter_colonne_si_absente("benefice", "INTEGER")
 
 curseur.execute("""
 CREATE TABLE IF NOT EXISTS surveillances (
@@ -73,6 +75,30 @@ CREATE TABLE IF NOT EXISTS surveillances (
     filtres_signature TEXT NOT NULL,
     date_creation TEXT NOT NULL,
     UNIQUE(recherche, chat_id, filtres_signature)
+)
+""")
+
+curseur.execute("""
+CREATE TABLE IF NOT EXISTS messages_business (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL,
+    date_envoi TEXT NOT NULL,
+    date_creation TEXT NOT NULL,
+    UNIQUE(chat_id, date_envoi)
+)
+""")
+
+curseur.execute("""
+CREATE TABLE IF NOT EXISTS statistiques_scans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER,
+    recherche TEXT NOT NULL,
+    annonces_analysees INTEGER NOT NULL,
+    nouvelles_annonces INTEGER NOT NULL,
+    bonnes_affaires INTEGER NOT NULL,
+    meilleur_modele TEXT,
+    meilleur_benefice INTEGER,
+    date_scan TEXT NOT NULL
 )
 """)
 
@@ -284,6 +310,18 @@ def annonce_existe(lien):
     return curseur.fetchone() is not None
 
 
+def mettre_a_jour_analyse_annonce(lien, score, benefice):
+    curseur.execute(
+        """
+        UPDATE annonces
+        SET score = ?, benefice = ?
+        WHERE lien = ?
+        """,
+        (score, benefice, lien)
+    )
+    connexion.commit()
+
+
 def _normaliser_kilometrage(kilometrage):
     if isinstance(kilometrage, int):
         return kilometrage
@@ -447,3 +485,125 @@ def lister_surveillances(chat_id=None):
         )
         for ligne in curseur.fetchall()
     ]
+
+
+def lister_chat_ids_surveillance():
+    curseur.execute(
+        """
+        SELECT DISTINCT chat_id
+        FROM surveillances
+        ORDER BY chat_id
+        """
+    )
+    return [ligne[0] for ligne in curseur.fetchall()]
+
+
+def enregistrer_statistiques_scan(
+    chat_id,
+    recherche,
+    annonces_analysees,
+    nouvelles_annonces,
+    bonnes_affaires,
+    meilleur_modele=None,
+    meilleur_benefice=None,
+    date_scan=None
+):
+    curseur.execute(
+        """
+        INSERT INTO statistiques_scans (
+            chat_id,
+            recherche,
+            annonces_analysees,
+            nouvelles_annonces,
+            bonnes_affaires,
+            meilleur_modele,
+            meilleur_benefice,
+            date_scan
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            chat_id,
+            recherche,
+            annonces_analysees,
+            nouvelles_annonces,
+            bonnes_affaires,
+            meilleur_modele,
+            meilleur_benefice,
+            date_scan or datetime.now().isoformat(timespec="seconds")
+        )
+    )
+    connexion.commit()
+
+
+def bilan_business(date_bilan, chat_id):
+    debut = f"{date_bilan}T00:00:00"
+    fin = f"{date_bilan}T23:59:59"
+
+    curseur.execute(
+        """
+        SELECT
+            COALESCE(SUM(annonces_analysees), 0),
+            COALESCE(SUM(nouvelles_annonces), 0),
+            COALESCE(SUM(bonnes_affaires), 0)
+        FROM statistiques_scans
+        WHERE chat_id = ?
+        AND date_scan BETWEEN ? AND ?
+        """,
+        (chat_id, debut, fin)
+    )
+    annonces_analysees, nouvelles_annonces, bonnes_affaires = curseur.fetchone()
+
+    curseur.execute(
+        """
+        SELECT meilleur_modele, meilleur_benefice
+        FROM statistiques_scans
+        WHERE chat_id = ?
+        AND date_scan BETWEEN ? AND ?
+        AND meilleur_modele IS NOT NULL
+        AND meilleur_benefice IS NOT NULL
+        ORDER BY meilleur_benefice DESC
+        LIMIT 1
+        """,
+        (chat_id, debut, fin)
+    )
+    meilleure = curseur.fetchone()
+
+    return {
+        "annonces_analysees": annonces_analysees,
+        "nouvelles_annonces": nouvelles_annonces,
+        "bonnes_affaires": bonnes_affaires,
+        "meilleur_modele": meilleure[0] if meilleure else None,
+        "meilleur_benefice": meilleure[1] if meilleure else None,
+    }
+
+
+def message_business_deja_envoye(chat_id, date_envoi):
+    curseur.execute(
+        """
+        SELECT 1
+        FROM messages_business
+        WHERE chat_id = ? AND date_envoi = ?
+        """,
+        (chat_id, str(date_envoi))
+    )
+    return curseur.fetchone() is not None
+
+
+def enregistrer_message_business(chat_id, date_envoi):
+    try:
+        curseur.execute(
+            """
+            INSERT INTO messages_business (chat_id, date_envoi, date_creation)
+            VALUES (?, ?, ?)
+            """,
+            (
+                chat_id,
+                str(date_envoi),
+                datetime.now().isoformat(timespec="seconds")
+            )
+        )
+        connexion.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
