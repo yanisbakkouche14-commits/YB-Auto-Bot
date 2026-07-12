@@ -1,7 +1,12 @@
 from voitures import voitures
+import atexit
+import logging
+import os
+import tempfile
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 from telegram import Update
+from telegram.error import Conflict
 from telegram.ext import Application, CommandHandler, ContextTypes
 from config import TOKEN
 
@@ -31,6 +36,10 @@ BENEFICE_ALERTE_MINIMUM = 2500
 MAX_ALERTES_PAR_RECHERCHE = 5
 FUSEAU_HORAIRE = ZoneInfo("Europe/Brussels")
 HEURE_MESSAGE_BUSINESS = time(8, 0, tzinfo=FUSEAU_HORAIRE)
+CHEMIN_VERROU_INSTANCE = os.getenv(
+    "YB_AUTO_BOT_LOCK",
+    os.path.join(tempfile.gettempdir(), "yb_auto_bot.lock")
+)
 scan_en_cours = False
 FILTRES_SURVEILLANCE = {
     "prix_min",
@@ -84,6 +93,89 @@ PHRASES_BUSINESS = [
     "Le suivi quotidien transforme le marché en terrain connu.",
     "Le vrai levier, c'est d'acheter quand la marge est déjà visible.",
 ]
+
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s - %(message)s"
+)
+logger = logging.getLogger("yb_auto_bot")
+
+
+def processus_actif(pid):
+    if not pid or pid <= 0:
+        return False
+
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
+def liberer_verrou_instance(chemin_verrou=CHEMIN_VERROU_INSTANCE):
+    try:
+        with open(chemin_verrou, "r", encoding="utf-8") as fichier:
+            pid_verrou = int(fichier.read().strip() or 0)
+    except (FileNotFoundError, OSError, ValueError):
+        return
+
+    if pid_verrou != os.getpid():
+        return
+
+    try:
+        os.remove(chemin_verrou)
+        logger.info("Verrou mono-instance libéré : %s", chemin_verrou)
+    except FileNotFoundError:
+        pass
+    except OSError as erreur:
+        logger.warning(
+            "Impossible de libérer le verrou mono-instance %s : %s",
+            chemin_verrou,
+            erreur
+        )
+
+
+def acquerir_verrou_instance(chemin_verrou=CHEMIN_VERROU_INSTANCE):
+    while True:
+        try:
+            descripteur = os.open(
+                chemin_verrou,
+                os.O_CREAT | os.O_EXCL | os.O_WRONLY
+            )
+        except FileExistsError:
+            try:
+                with open(chemin_verrou, "r", encoding="utf-8") as fichier:
+                    pid_verrou = int(fichier.read().strip() or 0)
+            except (OSError, ValueError):
+                pid_verrou = 0
+
+            if processus_actif(pid_verrou):
+                raise RuntimeError(
+                    "Une instance locale du bot semble déjà active "
+                    f"(pid={pid_verrou}, verrou={chemin_verrou})."
+                )
+
+            logger.warning(
+                "Verrou mono-instance obsolète supprimé : %s",
+                chemin_verrou
+            )
+            try:
+                os.remove(chemin_verrou)
+            except FileNotFoundError:
+                pass
+            continue
+
+        with os.fdopen(descripteur, "w", encoding="utf-8") as fichier:
+            fichier.write(str(os.getpid()))
+
+        atexit.register(liberer_verrou_instance, chemin_verrou)
+        logger.info("Verrou mono-instance acquis : %s", chemin_verrou)
+        return chemin_verrou
 
 
 def formater_prix(prix):
@@ -921,7 +1013,26 @@ def planifier_scan(app):
     return True
 
 
+async def gerer_erreur_telegram(update, context):
+    erreur = context.error
+
+    if isinstance(erreur, Conflict):
+        logger.error(
+            "Conflit Telegram getUpdates détecté. "
+            "Une autre instance utilise probablement le même token.",
+            exc_info=(type(erreur), erreur, erreur.__traceback__)
+        )
+        return
+
+    logger.error(
+        "Erreur Telegram non gérée pendant le traitement d'une update.",
+        exc_info=(type(erreur), erreur, erreur.__traceback__)
+    )
+
+
 def main():
+    acquerir_verrou_instance()
+
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
@@ -933,6 +1044,7 @@ def main():
     app.add_handler(CommandHandler("surveillances", surveillances))
     app.add_handler(CommandHandler("stop_surveillance", stop_surveillance))
     app.add_handler(CommandHandler("business", business))
+    app.add_error_handler(gerer_erreur_telegram)
 
     planifier_scan(app)
 
@@ -943,7 +1055,19 @@ def main():
     print("✅ Bot lancé avec succès !")
     print("=" * 60)
 
-    app.run_polling()
+    try:
+        app.run_polling()
+    except Conflict:
+        logger.error(
+            "telegram.error.Conflict pendant run_polling(). "
+            "Le bot ne masque pas cette erreur : vérifiez qu'un seul service, "
+            "un seul replica, aucun ancien projet et aucun bot local n'utilisent "
+            "le même token Telegram.",
+            exc_info=True
+        )
+        raise
+    finally:
+        liberer_verrou_instance()
 
 
 if __name__ == "__main__":
