@@ -1,0 +1,41 @@
+{
+  "default": 6,
+  "modeles": {
+    "vw_golf": 9,
+    "vw_golf_gti": 9,
+    "vw_polo": 8,
+    "audi_a3": 8,
+    "bmw_serie_1": 8,
+    "mercedes_classe_a": 8,
+    "peugeot_208": 8,
+    "renault_clio": 8,
+    "toyota_yaris": 8,
+    "ford_fiesta": 7,
+    "opel_corsa": 7,
+    "seat_leon": 7
+  },
+  "alias": {
+    "volkswagen golf": "vw_golf",
+    "golf": "vw_golf",
+    "vw golf": "vw_golf",
+    "golf gti": "vw_golf_gti",
+    "volkswagen golf gti": "vw_golf_gti",
+    "vw golf gti": "vw_golf_gti",
+    "golf 7 gti": "vw_golf_gti",
+    "volkswagen polo": "vw_polo",
+    "vw polo": "vw_polo",
+    "polo": "vw_polo",
+    "audi a3": "audi_a3",
+    "bmw serie 1": "bmw_serie_1",
+    "bmw série 1": "bmw_serie_1",
+    "bmw 118d": "bmw_serie_1",
+    "mercedes classe a": "mercedes_classe_a",
+    "mercedes a": "mercedes_classe_a",
+    "peugeot 208": "peugeot_208",
+    "renault clio": "renault_clio",
+    "toyota yaris": "toyota_yaris",
+    "ford fiesta": "ford_fiesta",
+    "opel corsa": "opel_corsa",
+    "seat leon": "seat_leon"
+  }
+}

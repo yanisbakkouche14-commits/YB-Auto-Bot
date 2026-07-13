@@ -52,6 +52,10 @@ from database.database import (
 
 from ai.analyse import analyser_annonce
 from ai.marche import analyser_marche
+from business.business_score import (
+    calculer_business_score,
+    formater_business_score,
+)
 from scanner.deuxiememain import rechercher_voitures as rechercher_2ememain
 
 
@@ -819,10 +823,12 @@ def analyser_scan_global(voitures, prix_max):
         if not est_nouvelle and not est_baisse_importante(infos_vendeur):
             continue
 
-        score_business = score_business_global(
+        voiture_score = dict(voiture)
+        voiture_score["prix"] = prix
+        business_score = calculer_business_score(
+            voiture_score,
             analyse,
             infos_vendeur,
-            prix,
             prix_max
         )
 
@@ -831,7 +837,8 @@ def analyser_scan_global(voitures, prix_max):
             "analyse": analyse,
             "infos_vendeur": infos_vendeur,
             "prix": prix,
-            "score_business": score_business,
+            "score_business": business_score["score"],
+            "business_score": business_score,
             "est_nouvelle": est_nouvelle,
         })
 
@@ -897,9 +904,16 @@ def formater_resume_scanner_global(nom_lot, opportunites, erreurs):
         voiture = opportunite["voiture"]
         analyse = opportunite["analyse"]
         infos_vendeur = opportunite["infos_vendeur"] or {}
+        business_score = opportunite.get("business_score")
         medaille = medailles[index - 1] if index <= 3 else f"{index}."
         baisse = infos_vendeur.get("baisse_totale", 0)
         score_vendeur = infos_vendeur.get("score", 0)
+        verdict_score = ""
+
+        if business_score:
+            verdict_score = (
+                f"{business_score['etoiles']} {business_score['verdict']}\n"
+            )
 
         blocs.append(
             "\n"
@@ -907,10 +921,14 @@ def formater_resume_scanner_global(nom_lot, opportunites, erreurs):
             f"💰 Prix : {formater_prix(opportunite['prix'])}\n"
             f"💵 Bénéfice estimé : +{formater_prix(analyse['benefice'])}\n"
             f"⭐ Score business : {opportunite['score_business']}/100\n"
+            f"{verdict_score}"
             f"📉 Baisse : {formater_prix(baisse)}\n"
             f"⏳ Vendeur pressé : {score_vendeur}/100\n"
             f"🔗 {voiture['lien']}\n"
         )
+
+        if business_score:
+            blocs.append(formater_business_score(business_score) + "\n")
 
     return "".join(blocs)
 
@@ -1860,7 +1878,7 @@ async def interface_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     elif data == "help:scores":
         await afficher_menu_callback(query, "⭐ Scores\n\nLe score IA évalue la qualité de l'annonce selon le prix, la marge et le contexte véhicule.", clavier_aide())
     elif data == "help:business_score":
-        await afficher_menu_callback(query, "🔥 Business Score\n\n40% score IA, 30% bénéfice, 15% vendeur pressé, 10% baisse de prix, 5% budget accessible.", clavier_aide())
+        await afficher_menu_callback(query, "🔥 Business Score V2\n\nScore d'investissement sur 100 basé sur le score IA, la marge, le vendeur pressé, l'historique des prix, le budget, le prix marché, la liquidité, le risque, la fiabilité, la LEZ, la popularité, les réparations et la disponibilité des pièces.", clavier_aide())
     elif data == "help:faq":
         await afficher_menu_callback(query, "❓ FAQ\n\nLes anciennes commandes restent disponibles, mais l'utilisation principale se fait maintenant avec les boutons.", clavier_aide())
 
