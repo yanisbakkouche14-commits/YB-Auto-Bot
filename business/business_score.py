@@ -92,6 +92,19 @@ def identifiant_modele(voiture, donnees=None):
         })
         modeles_connus.update(contenu.get("modeles", {}).keys())
 
+        for identifiant, fiche in contenu.get("modeles", {}).items():
+            if not isinstance(fiche, dict):
+                continue
+
+            alias = (
+                fiche.get("identite", {})
+                .get("alias", {})
+                .get("valeur", [])
+            )
+
+            for libelle in alias:
+                alias_global[normaliser_texte(libelle)] = identifiant
+
     for candidat in candidats:
         texte = normaliser_texte(candidat)
 
