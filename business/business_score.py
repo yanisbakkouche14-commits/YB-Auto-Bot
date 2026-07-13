@@ -299,7 +299,7 @@ def calculer_business_score(voiture, analyse, infos_vendeur=None, prix_max=None)
     scores_json = {}
 
     for critere, contenu in donnees.items():
-        if critere == "index" or not isinstance(contenu, dict):
+        if critere in {"index", "modeles"} or not isinstance(contenu, dict):
             continue
 
         if "modeles" not in contenu and "default" not in contenu:

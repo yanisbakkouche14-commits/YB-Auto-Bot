@@ -1,0 +1,494 @@
+{
+  "version": "1.0",
+  "last_update": "2026-07-13",
+  "market": "Belgique",
+  "models_count": 10,
+  "sources_globales": [
+    {
+      "nom": "config/vehicules_business.py",
+      "usage": "Liste interne des véhicules business suivis par le bot",
+      "date_verification": "2026-07-13",
+      "confiance": "élevé"
+    }
+  ],
+  "modeles": {
+    "vw_golf": {
+      "identite": {
+        "id": "vw_golf",
+        "marque": "Volkswagen",
+        "modele": "Golf",
+        "generation": {
+          "valeur": null,
+          "source": null,
+          "date_verification": null,
+          "confiance": "faible"
+        },
+        "alias": {
+          "valeur": ["Volkswagen Golf", "VW Golf", "Golf"],
+          "source": "normalisation interne",
+          "date_verification": "2026-07-13",
+          "confiance": "moyen"
+        },
+        "categorie": {
+          "valeur": "budget accessible",
+          "source": "config/vehicules_business.py",
+          "date_verification": "2026-07-13",
+          "confiance": "élevé"
+        }
+      },
+      "marche": {
+        "popularite_belgique": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "liquidite": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "delai_revente_jours": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "budget_achat_conseille": {"min": null, "max": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "kilometrage_ideal_max": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "annees_a_privilegier": {"valeur": [], "source": null, "date_verification": null, "confiance": "faible"},
+        "annees_a_eviter": {"valeur": [], "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "mecanique": {
+        "fiabilite": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "motorisations_conseillees": [],
+        "motorisations_a_eviter": [],
+        "boites_conseillees": [],
+        "boites_a_risque": [],
+        "pannes_frequentes": [],
+        "cout_reparation": {"bas": null, "moyen": null, "haut": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "disponibilite_pieces": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "lez": {
+        "norme_euro_minimale_conseillee": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "risque_lez_belgique": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "remarques": {"bruxelles": null, "anvers": null, "gand": null},
+        "impact_revente": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "business": {
+        "marge_brute_realiste_min": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "marge_brute_realiste_cible": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "niveau_risque": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "vitesse_rotation_capital": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "profil_acheteur_principal": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "verdict_metier_provisoire": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "historique": {
+        "date_creation": "2026-07-13",
+        "derniere_mise_a_jour": "2026-07-13",
+        "nombre_sources": 1,
+        "version_donnees": "1.0",
+        "derniere_verification": "2026-07-13"
+      },
+      "stats": {
+        "nombre_ventes_analysees": null,
+        "prix_moyen_observe": null,
+        "prix_min_observe": null,
+        "prix_max_observe": null,
+        "benefice_moyen": null,
+        "taux_recommandation": null
+      }
+    },
+    "vw_polo": {
+      "identite": {
+        "id": "vw_polo",
+        "marque": "Volkswagen",
+        "modele": "Polo",
+        "generation": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "alias": {"valeur": ["Volkswagen Polo", "VW Polo", "Polo"], "source": "normalisation interne", "date_verification": "2026-07-13", "confiance": "moyen"},
+        "categorie": {"valeur": "budget accessible", "source": "config/vehicules_business.py", "date_verification": "2026-07-13", "confiance": "élevé"}
+      },
+      "marche": {
+        "popularite_belgique": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "liquidite": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "delai_revente_jours": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "budget_achat_conseille": {"min": null, "max": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "kilometrage_ideal_max": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "annees_a_privilegier": {"valeur": [], "source": null, "date_verification": null, "confiance": "faible"},
+        "annees_a_eviter": {"valeur": [], "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "mecanique": {
+        "fiabilite": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "motorisations_conseillees": [],
+        "motorisations_a_eviter": [],
+        "boites_conseillees": [],
+        "boites_a_risque": [],
+        "pannes_frequentes": [],
+        "cout_reparation": {"bas": null, "moyen": null, "haut": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "disponibilite_pieces": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "lez": {
+        "norme_euro_minimale_conseillee": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "risque_lez_belgique": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "remarques": {"bruxelles": null, "anvers": null, "gand": null},
+        "impact_revente": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "business": {
+        "marge_brute_realiste_min": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "marge_brute_realiste_cible": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "niveau_risque": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "vitesse_rotation_capital": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "profil_acheteur_principal": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "verdict_metier_provisoire": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "historique": {"date_creation": "2026-07-13", "derniere_mise_a_jour": "2026-07-13", "nombre_sources": 1, "version_donnees": "1.0", "derniere_verification": "2026-07-13"},
+      "stats": {"nombre_ventes_analysees": null, "prix_moyen_observe": null, "prix_min_observe": null, "prix_max_observe": null, "benefice_moyen": null, "taux_recommandation": null}
+    },
+    "opel_corsa": {
+      "identite": {
+        "id": "opel_corsa",
+        "marque": "Opel",
+        "modele": "Corsa",
+        "generation": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "alias": {"valeur": ["Opel Corsa", "Corsa"], "source": "normalisation interne", "date_verification": "2026-07-13", "confiance": "moyen"},
+        "categorie": {"valeur": "budget accessible", "source": "config/vehicules_business.py", "date_verification": "2026-07-13", "confiance": "élevé"}
+      },
+      "marche": {
+        "popularite_belgique": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "liquidite": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "delai_revente_jours": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "budget_achat_conseille": {"min": null, "max": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "kilometrage_ideal_max": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "annees_a_privilegier": {"valeur": [], "source": null, "date_verification": null, "confiance": "faible"},
+        "annees_a_eviter": {"valeur": [], "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "mecanique": {
+        "fiabilite": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "motorisations_conseillees": [],
+        "motorisations_a_eviter": [],
+        "boites_conseillees": [],
+        "boites_a_risque": [],
+        "pannes_frequentes": [],
+        "cout_reparation": {"bas": null, "moyen": null, "haut": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "disponibilite_pieces": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "lez": {
+        "norme_euro_minimale_conseillee": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "risque_lez_belgique": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "remarques": {"bruxelles": null, "anvers": null, "gand": null},
+        "impact_revente": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "business": {
+        "marge_brute_realiste_min": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "marge_brute_realiste_cible": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "niveau_risque": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "vitesse_rotation_capital": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "profil_acheteur_principal": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "verdict_metier_provisoire": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "historique": {"date_creation": "2026-07-13", "derniere_mise_a_jour": "2026-07-13", "nombre_sources": 1, "version_donnees": "1.0", "derniere_verification": "2026-07-13"},
+      "stats": {"nombre_ventes_analysees": null, "prix_moyen_observe": null, "prix_min_observe": null, "prix_max_observe": null, "benefice_moyen": null, "taux_recommandation": null}
+    },
+    "renault_clio": {
+      "identite": {
+        "id": "renault_clio",
+        "marque": "Renault",
+        "modele": "Clio",
+        "generation": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "alias": {"valeur": ["Renault Clio", "Clio"], "source": "normalisation interne", "date_verification": "2026-07-13", "confiance": "moyen"},
+        "categorie": {"valeur": "budget accessible", "source": "config/vehicules_business.py", "date_verification": "2026-07-13", "confiance": "élevé"}
+      },
+      "marche": {
+        "popularite_belgique": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "liquidite": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "delai_revente_jours": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "budget_achat_conseille": {"min": null, "max": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "kilometrage_ideal_max": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "annees_a_privilegier": {"valeur": [], "source": null, "date_verification": null, "confiance": "faible"},
+        "annees_a_eviter": {"valeur": [], "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "mecanique": {
+        "fiabilite": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "motorisations_conseillees": [],
+        "motorisations_a_eviter": [],
+        "boites_conseillees": [],
+        "boites_a_risque": [],
+        "pannes_frequentes": [],
+        "cout_reparation": {"bas": null, "moyen": null, "haut": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "disponibilite_pieces": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "lez": {
+        "norme_euro_minimale_conseillee": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "risque_lez_belgique": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "remarques": {"bruxelles": null, "anvers": null, "gand": null},
+        "impact_revente": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "business": {
+        "marge_brute_realiste_min": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "marge_brute_realiste_cible": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "niveau_risque": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "vitesse_rotation_capital": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "profil_acheteur_principal": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "verdict_metier_provisoire": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "historique": {"date_creation": "2026-07-13", "derniere_mise_a_jour": "2026-07-13", "nombre_sources": 1, "version_donnees": "1.0", "derniere_verification": "2026-07-13"},
+      "stats": {"nombre_ventes_analysees": null, "prix_moyen_observe": null, "prix_min_observe": null, "prix_max_observe": null, "benefice_moyen": null, "taux_recommandation": null}
+    },
+    "peugeot_208": {
+      "identite": {
+        "id": "peugeot_208",
+        "marque": "Peugeot",
+        "modele": "208",
+        "generation": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "alias": {"valeur": ["Peugeot 208", "208"], "source": "normalisation interne", "date_verification": "2026-07-13", "confiance": "moyen"},
+        "categorie": {"valeur": "budget accessible", "source": "config/vehicules_business.py", "date_verification": "2026-07-13", "confiance": "élevé"}
+      },
+      "marche": {
+        "popularite_belgique": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "liquidite": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "delai_revente_jours": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "budget_achat_conseille": {"min": null, "max": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "kilometrage_ideal_max": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "annees_a_privilegier": {"valeur": [], "source": null, "date_verification": null, "confiance": "faible"},
+        "annees_a_eviter": {"valeur": [], "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "mecanique": {
+        "fiabilite": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "motorisations_conseillees": [],
+        "motorisations_a_eviter": [],
+        "boites_conseillees": [],
+        "boites_a_risque": [],
+        "pannes_frequentes": [],
+        "cout_reparation": {"bas": null, "moyen": null, "haut": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "disponibilite_pieces": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "lez": {
+        "norme_euro_minimale_conseillee": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "risque_lez_belgique": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "remarques": {"bruxelles": null, "anvers": null, "gand": null},
+        "impact_revente": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "business": {
+        "marge_brute_realiste_min": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "marge_brute_realiste_cible": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "niveau_risque": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "vitesse_rotation_capital": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "profil_acheteur_principal": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "verdict_metier_provisoire": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "historique": {"date_creation": "2026-07-13", "derniere_mise_a_jour": "2026-07-13", "nombre_sources": 1, "version_donnees": "1.0", "derniere_verification": "2026-07-13"},
+      "stats": {"nombre_ventes_analysees": null, "prix_moyen_observe": null, "prix_min_observe": null, "prix_max_observe": null, "benefice_moyen": null, "taux_recommandation": null}
+    },
+    "toyota_yaris": {
+      "identite": {
+        "id": "toyota_yaris",
+        "marque": "Toyota",
+        "modele": "Yaris",
+        "generation": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "alias": {"valeur": ["Toyota Yaris", "Yaris"], "source": "normalisation interne", "date_verification": "2026-07-13", "confiance": "moyen"},
+        "categorie": {"valeur": "budget accessible", "source": "config/vehicules_business.py", "date_verification": "2026-07-13", "confiance": "élevé"}
+      },
+      "marche": {
+        "popularite_belgique": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "liquidite": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "delai_revente_jours": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "budget_achat_conseille": {"min": null, "max": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "kilometrage_ideal_max": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "annees_a_privilegier": {"valeur": [], "source": null, "date_verification": null, "confiance": "faible"},
+        "annees_a_eviter": {"valeur": [], "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "mecanique": {
+        "fiabilite": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "motorisations_conseillees": [],
+        "motorisations_a_eviter": [],
+        "boites_conseillees": [],
+        "boites_a_risque": [],
+        "pannes_frequentes": [],
+        "cout_reparation": {"bas": null, "moyen": null, "haut": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "disponibilite_pieces": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "lez": {
+        "norme_euro_minimale_conseillee": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "risque_lez_belgique": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "remarques": {"bruxelles": null, "anvers": null, "gand": null},
+        "impact_revente": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "business": {
+        "marge_brute_realiste_min": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "marge_brute_realiste_cible": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "niveau_risque": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "vitesse_rotation_capital": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "profil_acheteur_principal": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "verdict_metier_provisoire": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "historique": {"date_creation": "2026-07-13", "derniere_mise_a_jour": "2026-07-13", "nombre_sources": 1, "version_donnees": "1.0", "derniere_verification": "2026-07-13"},
+      "stats": {"nombre_ventes_analysees": null, "prix_moyen_observe": null, "prix_min_observe": null, "prix_max_observe": null, "benefice_moyen": null, "taux_recommandation": null}
+    },
+    "audi_a3": {
+      "identite": {
+        "id": "audi_a3",
+        "marque": "Audi",
+        "modele": "A3",
+        "generation": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "alias": {"valeur": ["Audi A3", "A3"], "source": "normalisation interne", "date_verification": "2026-07-13", "confiance": "moyen"},
+        "categorie": {"valeur": "compacte demandée", "source": "config/vehicules_business.py", "date_verification": "2026-07-13", "confiance": "élevé"}
+      },
+      "marche": {
+        "popularite_belgique": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "liquidite": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "delai_revente_jours": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "budget_achat_conseille": {"min": null, "max": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "kilometrage_ideal_max": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "annees_a_privilegier": {"valeur": [], "source": null, "date_verification": null, "confiance": "faible"},
+        "annees_a_eviter": {"valeur": [], "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "mecanique": {
+        "fiabilite": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "motorisations_conseillees": [],
+        "motorisations_a_eviter": [],
+        "boites_conseillees": [],
+        "boites_a_risque": [],
+        "pannes_frequentes": [],
+        "cout_reparation": {"bas": null, "moyen": null, "haut": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "disponibilite_pieces": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "lez": {
+        "norme_euro_minimale_conseillee": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "risque_lez_belgique": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "remarques": {"bruxelles": null, "anvers": null, "gand": null},
+        "impact_revente": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "business": {
+        "marge_brute_realiste_min": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "marge_brute_realiste_cible": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "niveau_risque": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "vitesse_rotation_capital": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "profil_acheteur_principal": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "verdict_metier_provisoire": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "historique": {"date_creation": "2026-07-13", "derniere_mise_a_jour": "2026-07-13", "nombre_sources": 1, "version_donnees": "1.0", "derniere_verification": "2026-07-13"},
+      "stats": {"nombre_ventes_analysees": null, "prix_moyen_observe": null, "prix_min_observe": null, "prix_max_observe": null, "benefice_moyen": null, "taux_recommandation": null}
+    },
+    "bmw_serie_1": {
+      "identite": {
+        "id": "bmw_serie_1",
+        "marque": "BMW",
+        "modele": "Série 1",
+        "generation": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "alias": {"valeur": ["BMW Série 1", "BMW Serie 1", "BMW 118d", "Serie 1"], "source": "normalisation interne", "date_verification": "2026-07-13", "confiance": "moyen"},
+        "categorie": {"valeur": "compacte demandée", "source": "config/vehicules_business.py", "date_verification": "2026-07-13", "confiance": "élevé"}
+      },
+      "marche": {
+        "popularite_belgique": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "liquidite": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "delai_revente_jours": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "budget_achat_conseille": {"min": null, "max": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "kilometrage_ideal_max": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "annees_a_privilegier": {"valeur": [], "source": null, "date_verification": null, "confiance": "faible"},
+        "annees_a_eviter": {"valeur": [], "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "mecanique": {
+        "fiabilite": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "motorisations_conseillees": [],
+        "motorisations_a_eviter": [],
+        "boites_conseillees": [],
+        "boites_a_risque": [],
+        "pannes_frequentes": [],
+        "cout_reparation": {"bas": null, "moyen": null, "haut": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "disponibilite_pieces": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "lez": {
+        "norme_euro_minimale_conseillee": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "risque_lez_belgique": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "remarques": {"bruxelles": null, "anvers": null, "gand": null},
+        "impact_revente": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "business": {
+        "marge_brute_realiste_min": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "marge_brute_realiste_cible": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "niveau_risque": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "vitesse_rotation_capital": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "profil_acheteur_principal": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "verdict_metier_provisoire": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "historique": {"date_creation": "2026-07-13", "derniere_mise_a_jour": "2026-07-13", "nombre_sources": 1, "version_donnees": "1.0", "derniere_verification": "2026-07-13"},
+      "stats": {"nombre_ventes_analysees": null, "prix_moyen_observe": null, "prix_min_observe": null, "prix_max_observe": null, "benefice_moyen": null, "taux_recommandation": null}
+    },
+    "mercedes_classe_a": {
+      "identite": {
+        "id": "mercedes_classe_a",
+        "marque": "Mercedes-Benz",
+        "modele": "Classe A",
+        "generation": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "alias": {"valeur": ["Mercedes Classe A", "Mercedes-Benz Classe A", "Mercedes A", "Classe A"], "source": "normalisation interne", "date_verification": "2026-07-13", "confiance": "moyen"},
+        "categorie": {"valeur": "compacte demandée", "source": "config/vehicules_business.py", "date_verification": "2026-07-13", "confiance": "élevé"}
+      },
+      "marche": {
+        "popularite_belgique": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "liquidite": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "delai_revente_jours": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "budget_achat_conseille": {"min": null, "max": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "kilometrage_ideal_max": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "annees_a_privilegier": {"valeur": [], "source": null, "date_verification": null, "confiance": "faible"},
+        "annees_a_eviter": {"valeur": [], "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "mecanique": {
+        "fiabilite": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "motorisations_conseillees": [],
+        "motorisations_a_eviter": [],
+        "boites_conseillees": [],
+        "boites_a_risque": [],
+        "pannes_frequentes": [],
+        "cout_reparation": {"bas": null, "moyen": null, "haut": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "disponibilite_pieces": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "lez": {
+        "norme_euro_minimale_conseillee": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "risque_lez_belgique": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "remarques": {"bruxelles": null, "anvers": null, "gand": null},
+        "impact_revente": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "business": {
+        "marge_brute_realiste_min": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "marge_brute_realiste_cible": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "niveau_risque": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "vitesse_rotation_capital": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "profil_acheteur_principal": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "verdict_metier_provisoire": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "historique": {"date_creation": "2026-07-13", "derniere_mise_a_jour": "2026-07-13", "nombre_sources": 1, "version_donnees": "1.0", "derniere_verification": "2026-07-13"},
+      "stats": {"nombre_ventes_analysees": null, "prix_moyen_observe": null, "prix_min_observe": null, "prix_max_observe": null, "benefice_moyen": null, "taux_recommandation": null}
+    },
+    "vw_golf_gti": {
+      "identite": {
+        "id": "vw_golf_gti",
+        "marque": "Volkswagen",
+        "modele": "Golf GTI",
+        "generation": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "alias": {"valeur": ["Golf GTI", "Volkswagen Golf GTI", "VW Golf GTI", "Golf 7 GTI"], "source": "normalisation interne", "date_verification": "2026-07-13", "confiance": "moyen"},
+        "categorie": {"valeur": "sportive/premium", "source": "config/vehicules_business.py", "date_verification": "2026-07-13", "confiance": "élevé"}
+      },
+      "marche": {
+        "popularite_belgique": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "liquidite": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "delai_revente_jours": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "budget_achat_conseille": {"min": null, "max": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "kilometrage_ideal_max": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "annees_a_privilegier": {"valeur": [], "source": null, "date_verification": null, "confiance": "faible"},
+        "annees_a_eviter": {"valeur": [], "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "mecanique": {
+        "fiabilite": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "motorisations_conseillees": [],
+        "motorisations_a_eviter": [],
+        "boites_conseillees": [],
+        "boites_a_risque": [],
+        "pannes_frequentes": [],
+        "cout_reparation": {"bas": null, "moyen": null, "haut": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "disponibilite_pieces": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "lez": {
+        "norme_euro_minimale_conseillee": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "risque_lez_belgique": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "remarques": {"bruxelles": null, "anvers": null, "gand": null},
+        "impact_revente": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "business": {
+        "marge_brute_realiste_min": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "marge_brute_realiste_cible": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "niveau_risque": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "vitesse_rotation_capital": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "profil_acheteur_principal": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
+        "verdict_metier_provisoire": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"}
+      },
+      "historique": {"date_creation": "2026-07-13", "derniere_mise_a_jour": "2026-07-13", "nombre_sources": 1, "version_donnees": "1.0", "derniere_verification": "2026-07-13"},
+      "stats": {"nombre_ventes_analysees": null, "prix_moyen_observe": null, "prix_min_observe": null, "prix_max_observe": null, "benefice_moyen": null, "taux_recommandation": null}
+    }
+  }
+}
