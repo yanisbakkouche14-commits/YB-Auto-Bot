@@ -145,14 +145,30 @@ PHRASES_BUSINESS = [
 ]
 
 
+MENU_PRINCIPAL_ACTIONS = [
+    [("🏠 Accueil", "menu:home")],
+    [("🔥 Scanner Business", "menu:scanner"), ("⭐ Opportunités", "menu:opportunities")],
+    [("❤️ Favoris", "menu:favorites"), ("📊 Tableau de bord", "menu:dashboard")],
+    [("⚙️ Paramètres", "menu:settings"), ("ℹ️ Aide", "menu:help")],
+]
+
 MENU_PRINCIPAL_BOUTONS = [
-    ["🔥 Scanner Business", "⭐ Opportunités"],
-    ["❤️ Favoris", "📊 Tableau de bord"],
-    ["⚙️ Paramètres", "ℹ️ Aide"],
+    [libelle for libelle, _callback_data in ligne]
+    for ligne in MENU_PRINCIPAL_ACTIONS
 ]
 
 
 def clavier_principal():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(libelle, callback_data=callback_data)
+            for libelle, callback_data in ligne
+        ]
+        for ligne in MENU_PRINCIPAL_ACTIONS
+    ])
+
+
+def clavier_principal_reponse():
     return ReplyKeyboardMarkup(
         MENU_PRINCIPAL_BOUTONS,
         resize_keyboard=True
@@ -1768,7 +1784,7 @@ async def interface_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     chat_id = query.message.chat_id
 
     if data == "menu:home":
-        await afficher_menu_callback(query, texte_accueil(), clavier_retour_accueil())
+        await afficher_menu_callback(query, texte_accueil(), clavier_principal())
     elif data == "menu:scanner":
         await afficher_menu_callback(query, texte_scanner_business(), clavier_scanner_business())
     elif data == "menu:opportunities":
@@ -1852,7 +1868,9 @@ async def interface_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def gerer_reply_keyboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texte = (update.message.text or "").strip()
 
-    if texte == "🔥 Scanner Business":
+    if texte == "🏠 Accueil":
+        await update.message.reply_text(texte_accueil(), reply_markup=clavier_principal())
+    elif texte == "🔥 Scanner Business":
         await update.message.reply_text(texte_scanner_business(), reply_markup=clavier_scanner_business())
     elif texte == "⭐ Opportunités":
         await update.message.reply_text(texte_opportunites(), reply_markup=clavier_opportunites())
