@@ -1750,6 +1750,8 @@ async def europe(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def formater_resultat_marketplace(modele, annonces):
+    etat = etat_marketplace()
+    derniere_erreur = etat.get("derniere_erreur") or ""
     blocs = [
         "🛒 FACEBOOK MARKETPLACE",
         "",
@@ -1759,6 +1761,15 @@ def formater_resultat_marketplace(modele, annonces):
     ]
 
     if not annonces:
+        if (
+            "authentification" in derniere_erreur.lower()
+            or "session facebook expir" in derniere_erreur.lower()
+        ):
+            blocs.append(
+                derniere_erreur
+            )
+            return "\n".join(blocs)
+
         blocs.append(
             "Aucune annonce exploitable trouvée ou Marketplace temporairement indisponible."
         )

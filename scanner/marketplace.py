@@ -15,6 +15,9 @@ MAX_ANNONCES = 20
 TIMEOUT = 10
 SEUIL_ECHECS = 3
 TEST_SANTE_RECHERCHE = "golf"
+LOCAL_SERVICE_URL = os.getenv("MARKETPLACE_LOCAL_URL", "").strip().rstrip("/")
+LOCAL_SERVICE_TOKEN = os.getenv("MARKETPLACE_LOCAL_TOKEN", "").strip()
+LOCAL_SERVICE_TIMEOUT = 12
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +42,10 @@ HEADERS = {
 
 
 class MarketplaceIndisponible(RuntimeError):
+    pass
+
+
+class MarketplaceAuthentificationRequise(MarketplaceIndisponible):
     pass
 
 
@@ -129,6 +136,121 @@ def _construire_url(modele):
     return f"{SEARCH_URL}?query={quote_plus(modele)}&exact=false"
 
 
+def _annonce_service_local(annonce, modele):
+    ville = annonce.get("ville") or "Belgique"
+    titre = annonce.get("titre") or modele
+
+    return {
+        "source": "Facebook Marketplace",
+        "pays": "Belgique",
+        "modele": titre,
+        "titre": titre,
+        "prix": annonce.get("prix", "Inconnu"),
+        "kilometrage": annonce.get("kilometrage", "Inconnu"),
+        "annee": annonce.get("annee", "Inconnu"),
+        "ville": ville,
+        "localisation": ville,
+        "lien": annonce.get("lien", ""),
+    }
+
+
+def _rechercher_service_local(modele):
+    if not LOCAL_SERVICE_URL:
+        return None
+
+    headers = {}
+
+    if LOCAL_SERVICE_TOKEN:
+        headers["Authorization"] = f"Bearer {LOCAL_SERVICE_TOKEN}"
+
+    url = f"{LOCAL_SERVICE_URL}/marketplace"
+
+    try:
+        reponse = requests.get(
+            url,
+            params={"modele": modele, "limite": MAX_ANNONCES},
+            headers=headers,
+            timeout=LOCAL_SERVICE_TIMEOUT
+        )
+        logger.info(
+            "Facebook Marketplace service local: code_http=%s taille_reponse=%s",
+            reponse.status_code,
+            len(reponse.text or "")
+        )
+        donnees = reponse.json()
+    except requests.exceptions.Timeout as erreur:
+        raise MarketplaceIndisponible(
+            f"service local Marketplace timeout: {erreur}"
+        ) from erreur
+    except requests.exceptions.RequestException as erreur:
+        raise MarketplaceIndisponible(
+            f"service local Marketplace indisponible: {erreur}"
+        ) from erreur
+    except ValueError as erreur:
+        raise MarketplaceIndisponible(
+            "service local Marketplace réponse JSON invalide"
+        ) from erreur
+
+    if not donnees.get("ok"):
+        erreur = donnees.get("erreur") or "service local Marketplace indisponible"
+
+        if "session facebook expirée" in erreur.lower():
+            raise MarketplaceAuthentificationRequise(erreur)
+
+        raise MarketplaceIndisponible(erreur)
+
+    annonces = [
+        _annonce_service_local(annonce, modele)
+        for annonce in donnees.get("annonces", [])[:MAX_ANNONCES]
+        if annonce.get("lien")
+    ]
+    logger.info(
+        "Facebook Marketplace service local: annonces=%s",
+        len(annonces)
+    )
+    return annonces
+
+
+def _titre_page(soup):
+    titre = soup.select_one("title")
+    return titre.get_text(" ", strip=True) if titre else "Inconnu"
+
+
+def _diagnostic_html(soup, html, status_code=None):
+    html_min = (html or "").lower()
+    texte = soup.get_text(" ", strip=True).lower()
+    titre = _titre_page(soup)
+    diagnostic = {
+        "code_http": status_code,
+        "taille_html": len(html or ""),
+        "titre_page": titre,
+        "login": any(
+            mot in texte or mot in html_min
+            for mot in (
+                "login",
+                "connectez-vous",
+                "se connecter",
+                "log in to facebook",
+            )
+        ),
+        "checkpoint": "checkpoint" in texte or "checkpoint" in html_min,
+        "captcha": "captcha" in texte or "captcha" in html_min,
+        "marketplace": "marketplace" in texte or "marketplace" in html_min,
+    }
+    logger.info(
+        "Facebook Marketplace diagnostic: code_http=%s taille_html=%s "
+        "titre_page=%r login=%s checkpoint=%s captcha=%s marketplace=%s",
+        diagnostic["code_http"],
+        diagnostic["taille_html"],
+        diagnostic["titre_page"],
+        diagnostic["login"],
+        diagnostic["checkpoint"],
+        diagnostic["captcha"],
+        diagnostic["marketplace"],
+    )
+    return diagnostic
+
+
 def _nombre(texte):
     valeur = re.sub(r"\D", "", texte or "")
     return int(valeur) if valeur else "Inconnu"
@@ -196,23 +318,20 @@ def _ville(texte):
     return "Belgique"
 
 
-def _detecter_blocage(soup, html):
+def _detecter_blocage(soup, html, diagnostic=None):
+    diagnostic = diagnostic or _diagnostic_html(soup, html)
     texte = soup.get_text(" ", strip=True).lower()
-    url_login = "login" in html.lower() and "marketplace" not in texte
 
-    if "checkpoint" in html.lower() or "checkpoint" in texte:
+    if diagnostic["checkpoint"]:
         raise MarketplaceIndisponible("checkpoint Facebook detecte")
 
-    if "captcha" in texte or "captcha" in html.lower():
+    if diagnostic["captcha"]:
         raise MarketplaceIndisponible("captcha Facebook detecte")
 
-    if (
-        url_login
-        or "connectez-vous" in texte
-        or "log in to facebook" in texte
-        or "se connecter" in texte
-    ):
-        raise MarketplaceIndisponible("page de login Facebook detectee")
+    if diagnostic["login"]:
+        raise MarketplaceAuthentificationRequise(
+            "Facebook nécessite une authentification pour afficher Marketplace"
+        )
 
     if not texte.strip():
         raise MarketplaceIndisponible("page vide")
@@ -330,26 +449,38 @@ def _titre(carte, texte, modele):
     return modele
 
 
-def _extraire_annonces(html, modele):
+def _extraire_annonces(html, modele, status_code=None):
     soup = BeautifulSoup(html, "html.parser")
-    _detecter_blocage(soup, html)
+    diagnostic = _diagnostic_html(soup, html, status_code=status_code)
+    _detecter_blocage(soup, html, diagnostic=diagnostic)
 
-    strategies = (
-        _extraire_donnees_structurees(soup, modele),
-        _extraire_selecteurs(
-            soup,
-            modele,
-            ("a[href*='/marketplace/item/']",),
+    strategies = [
+        ("donnees_structurees", _extraire_donnees_structurees(soup, modele)),
+        (
+            "selecteurs_principaux",
+            _extraire_selecteurs(
+                soup,
+                modele,
+                ("a[href*='/marketplace/item/']",),
+            ),
         ),
-        _extraire_selecteurs(
-            soup,
-            modele,
-            ("[role='article']", "div[data-testid*='marketplace']"),
+        (
+            "selecteurs_secours",
+            _extraire_selecteurs(
+                soup,
+                modele,
+                ("[role='article']", "div[data-testid*='marketplace']"),
+            ),
         ),
-        _extraire_navigateur_automatise(modele),
-    )
+        ("navigateur_automatise", _extraire_navigateur_automatise(modele)),
+    ]
 
-    for annonces in strategies:
+    for nom, annonces in strategies:
+        logger.info(
+            "Facebook Marketplace strategie=%s annonces=%s",
+            nom,
+            len(annonces)
+        )
         if annonces:
             return annonces[:MAX_ANNONCES]
 
@@ -361,12 +492,35 @@ def rechercher_voitures(modele, ignorer_desactivation=False):
         logger.warning("Facebook Marketplace desactive temporairement.")
         return []
 
+    if LOCAL_SERVICE_URL:
+        try:
+            annonces = _rechercher_service_local(modele)
+            _enregistrer_reussite()
+            return annonces
+        except MarketplaceAuthentificationRequise as erreur:
+            logger.warning("%s", erreur)
+            _enregistrer_echec(erreur)
+            return []
+        except MarketplaceIndisponible as erreur:
+            _enregistrer_echec(erreur)
+            return []
+
     url = _construire_url(modele)
 
     try:
         reponse = _session().get(url, timeout=TIMEOUT)
+        logger.info(
+            "Facebook Marketplace requete: url=%s code_http=%s taille_html=%s",
+            url,
+            reponse.status_code,
+            len(reponse.text or "")
+        )
         reponse.raise_for_status()
-        annonces = _extraire_annonces(reponse.text, modele)
+        annonces = _extraire_annonces(
+            reponse.text,
+            modele,
+            status_code=reponse.status_code
+        )
         _enregistrer_reussite()
         return annonces
     except requests.exceptions.Timeout as erreur:
@@ -374,6 +528,10 @@ def rechercher_voitures(modele, ignorer_desactivation=False):
         return []
     except requests.exceptions.RequestException as erreur:
         _enregistrer_echec(f"inaccessible: {erreur}")
+        return []
+    except MarketplaceAuthentificationRequise as erreur:
+        logger.warning("%s", erreur)
+        _enregistrer_echec(erreur)
         return []
     except MarketplaceIndisponible as erreur:
         _enregistrer_echec(erreur)
