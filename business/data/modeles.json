@@ -23,6 +23,12 @@
           "date_verification": null,
           "confiance": "faible"
         },
+        "remarques_generationnelles": {
+          "valeur": "Ne pas agreger automatiquement Golf 6, Golf 7 et Golf 8 : la compatibilite LEZ depend de la norme Euro, du carburant et du certificat du vehicule, pas seulement de la generation ou de l'annee.",
+          "source": "Regle de normalisation interne; verification LEZ via certificat d'immatriculation/COC recommandee par les portails LEZ officiels",
+          "date_verification": "2026-07-14",
+          "confiance": "moyen"
+        },
         "alias": {
           "valeur": ["Volkswagen Golf", "VW Golf", "Golf"],
           "source": "normalisation interne",
@@ -56,10 +62,50 @@
         "disponibilite_pieces": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"}
       },
       "lez": {
-        "norme_euro_minimale_conseillee": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
-        "risque_lez_belgique": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
-        "remarques": {"bruxelles": null, "anvers": null, "gand": null},
-        "impact_revente": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"}
+        "norme_euro_minimale_conseillee": {
+          "valeur": "Euro 6 (recommandation business prudente, non legale)",
+          "source": "https://lez.brussels/mytax/en/practical?tab=Agenda; https://stad.gent/en/mobility-ghent/low-emission-zone-ghent/conditions-entering-low-emission-zone",
+          "date_verification": "2026-07-14",
+          "confiance": "moyen"
+        },
+        "risque_lez_belgique": {
+          "valeur": "variable selon carburant et norme Euro",
+          "source": "https://lez.brussels/mytax/en/practical?tab=Agenda; https://stad.gent/en/mobility-ghent/low-emission-zone-ghent/conditions-entering-low-emission-zone",
+          "date_verification": "2026-07-14",
+          "confiance": "moyen"
+        },
+        "remarques": {
+          "bruxelles": {
+            "valeur": "Bruxelles indique que les vehicules diesel Euro 5 et essence Euro 2 ne respectent plus les criteres d'acces a partir du 1er janvier 2026. La norme Euro doit etre verifiee sur le certificat d'immatriculation, le COC ou les documents officiels du vehicule.",
+            "source": "https://lez.brussels/mytax/en/practical?tab=Agenda",
+            "date_verification": "2026-07-14",
+            "confiance": "eleve"
+          },
+          "anvers": {
+            "valeur": "inconnu",
+            "source": null,
+            "date_verification": null,
+            "confiance": "faible"
+          },
+          "gand": {
+            "valeur": "Gand indique que l'acces depend du carburant et de la norme Euro. Les diesels Euro 6 et Euro 5 ont acces libre, les diesels Euro 4 necessitent un paiement, et les conditions actuelles ne sont pas durcies avant reevaluation officielle.",
+            "source": "https://stad.gent/en/mobility-ghent/low-emission-zone-ghent/conditions-entering-low-emission-zone",
+            "date_verification": "2026-07-14",
+            "confiance": "eleve"
+          },
+          "verification_norme_euro": {
+            "valeur": "Ne pas deduire automatiquement la norme Euro depuis l'annee. Verifier le certificat d'immatriculation, le COC ou les donnees officielles du vehicule.",
+            "source": "https://lez.brussels/mytax/en/practical?tab=Agenda; https://stad.gent/en/mobility-ghent/low-emission-zone-ghent/conditions-entering-low-emission-zone",
+            "date_verification": "2026-07-14",
+            "confiance": "eleve"
+          }
+        },
+        "impact_revente": {
+          "valeur": "Impact qualitatif uniquement : une Golf diesel Euro 5 ou plus ancienne peut subir une decote ou une liquidite reduite pour les acheteurs circulant en LEZ, surtout autour de Bruxelles. La recommandation business prudente est de privilegier une norme Euro 6 verifiee.",
+          "source": "https://lez.brussels/mytax/en/practical?tab=Agenda; https://stad.gent/en/mobility-ghent/low-emission-zone-ghent/conditions-entering-low-emission-zone",
+          "date_verification": "2026-07-14",
+          "confiance": "moyen"
+        }
       },
       "business": {
         "marge_brute_realiste_min": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
@@ -71,10 +117,10 @@
       },
       "historique": {
         "date_creation": "2026-07-13",
-        "derniere_mise_a_jour": "2026-07-13",
-        "nombre_sources": 1,
-        "version_donnees": "1.0",
-        "derniere_verification": "2026-07-13"
+        "derniere_mise_a_jour": "2026-07-14",
+        "nombre_sources": 3,
+        "version_donnees": "1.1",
+        "derniere_verification": "2026-07-14"
       },
       "stats": {
         "nombre_ventes_analysees": null,
@@ -271,6 +317,12 @@
         "marque": "Toyota",
         "modele": "Yaris",
         "generation": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "remarques_generationnelles": {
+          "valeur": "Ne pas melanger les generations Yaris essence, diesel, hybride et recentes : la compatibilite LEZ depend de la norme Euro et du carburant verifies sur certificat, pas uniquement de l'annee ou du nom commercial.",
+          "source": "Regle de normalisation interne; verification LEZ via certificat d'immatriculation/COC recommandee par les portails LEZ officiels",
+          "date_verification": "2026-07-14",
+          "confiance": "moyen"
+        },
         "alias": {"valeur": ["Toyota Yaris", "Yaris"], "source": "normalisation interne", "date_verification": "2026-07-13", "confiance": "moyen"},
         "categorie": {"valeur": "budget accessible", "source": "config/vehicules_business.py", "date_verification": "2026-07-13", "confiance": "élevé"}
       },
@@ -294,10 +346,50 @@
         "disponibilite_pieces": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"}
       },
       "lez": {
-        "norme_euro_minimale_conseillee": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
-        "risque_lez_belgique": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
-        "remarques": {"bruxelles": null, "anvers": null, "gand": null},
-        "impact_revente": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"}
+        "norme_euro_minimale_conseillee": {
+          "valeur": "Euro 6 (recommandation business prudente, non legale)",
+          "source": "https://lez.brussels/mytax/en/practical?tab=Agenda; https://stad.gent/en/mobility-ghent/low-emission-zone-ghent/conditions-entering-low-emission-zone",
+          "date_verification": "2026-07-14",
+          "confiance": "moyen"
+        },
+        "risque_lez_belgique": {
+          "valeur": "variable selon carburant et norme Euro",
+          "source": "https://lez.brussels/mytax/en/practical?tab=Agenda; https://stad.gent/en/mobility-ghent/low-emission-zone-ghent/conditions-entering-low-emission-zone",
+          "date_verification": "2026-07-14",
+          "confiance": "moyen"
+        },
+        "remarques": {
+          "bruxelles": {
+            "valeur": "Bruxelles indique que les vehicules diesel Euro 5 et essence Euro 2 ne respectent plus les criteres d'acces a partir du 1er janvier 2026. La norme Euro doit etre verifiee sur le certificat d'immatriculation, le COC ou les documents officiels du vehicule.",
+            "source": "https://lez.brussels/mytax/en/practical?tab=Agenda",
+            "date_verification": "2026-07-14",
+            "confiance": "eleve"
+          },
+          "anvers": {
+            "valeur": "inconnu",
+            "source": null,
+            "date_verification": null,
+            "confiance": "faible"
+          },
+          "gand": {
+            "valeur": "Gand indique que l'acces depend du carburant et de la norme Euro. Les diesels Euro 6 et Euro 5 ont acces libre, les diesels Euro 4 necessitent un paiement, et les conditions actuelles ne sont pas durcies avant reevaluation officielle.",
+            "source": "https://stad.gent/en/mobility-ghent/low-emission-zone-ghent/conditions-entering-low-emission-zone",
+            "date_verification": "2026-07-14",
+            "confiance": "eleve"
+          },
+          "verification_norme_euro": {
+            "valeur": "Ne pas deduire automatiquement la norme Euro depuis l'annee. Verifier le certificat d'immatriculation, le COC ou les donnees officielles du vehicule.",
+            "source": "https://lez.brussels/mytax/en/practical?tab=Agenda; https://stad.gent/en/mobility-ghent/low-emission-zone-ghent/conditions-entering-low-emission-zone",
+            "date_verification": "2026-07-14",
+            "confiance": "eleve"
+          }
+        },
+        "impact_revente": {
+          "valeur": "Impact qualitatif uniquement : une Yaris diesel ancienne est plus exposee aux restrictions LEZ qu'une essence ou hybride recente avec norme Euro verifiee. La recommandation business prudente est de privilegier une norme Euro 6 verifiee.",
+          "source": "https://lez.brussels/mytax/en/practical?tab=Agenda; https://stad.gent/en/mobility-ghent/low-emission-zone-ghent/conditions-entering-low-emission-zone",
+          "date_verification": "2026-07-14",
+          "confiance": "moyen"
+        }
       },
       "business": {
         "marge_brute_realiste_min": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
@@ -307,7 +399,7 @@
         "profil_acheteur_principal": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
         "verdict_metier_provisoire": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"}
       },
-      "historique": {"date_creation": "2026-07-13", "derniere_mise_a_jour": "2026-07-13", "nombre_sources": 1, "version_donnees": "1.0", "derniere_verification": "2026-07-13"},
+      "historique": {"date_creation": "2026-07-13", "derniere_mise_a_jour": "2026-07-14", "nombre_sources": 3, "version_donnees": "1.1", "derniere_verification": "2026-07-14"},
       "stats": {"nombre_ventes_analysees": null, "prix_moyen_observe": null, "prix_min_observe": null, "prix_max_observe": null, "benefice_moyen": null, "taux_recommandation": null}
     },
     "audi_a3": {
@@ -361,6 +453,12 @@
         "marque": "BMW",
         "modele": "Série 1",
         "generation": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
+        "remarques_generationnelles": {
+          "valeur": "Ne pas melanger les generations E87, F20/F21 et F40 : la compatibilite LEZ depend de la norme Euro et du carburant verifies sur certificat, pas uniquement de la generation, de l'annee ou de l'appellation commerciale.",
+          "source": "Regle de normalisation interne; verification LEZ via certificat d'immatriculation/COC recommandee par les portails LEZ officiels",
+          "date_verification": "2026-07-14",
+          "confiance": "moyen"
+        },
         "alias": {"valeur": ["BMW Série 1", "BMW Serie 1", "BMW 118d", "Serie 1"], "source": "normalisation interne", "date_verification": "2026-07-13", "confiance": "moyen"},
         "categorie": {"valeur": "compacte demandée", "source": "config/vehicules_business.py", "date_verification": "2026-07-13", "confiance": "élevé"}
       },
@@ -384,10 +482,50 @@
         "disponibilite_pieces": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"}
       },
       "lez": {
-        "norme_euro_minimale_conseillee": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
-        "risque_lez_belgique": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
-        "remarques": {"bruxelles": null, "anvers": null, "gand": null},
-        "impact_revente": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"}
+        "norme_euro_minimale_conseillee": {
+          "valeur": "Euro 6 (recommandation business prudente, non legale)",
+          "source": "https://lez.brussels/mytax/en/practical?tab=Agenda; https://stad.gent/en/mobility-ghent/low-emission-zone-ghent/conditions-entering-low-emission-zone",
+          "date_verification": "2026-07-14",
+          "confiance": "moyen"
+        },
+        "risque_lez_belgique": {
+          "valeur": "variable selon carburant et norme Euro",
+          "source": "https://lez.brussels/mytax/en/practical?tab=Agenda; https://stad.gent/en/mobility-ghent/low-emission-zone-ghent/conditions-entering-low-emission-zone",
+          "date_verification": "2026-07-14",
+          "confiance": "moyen"
+        },
+        "remarques": {
+          "bruxelles": {
+            "valeur": "Bruxelles indique que les vehicules diesel Euro 5 et essence Euro 2 ne respectent plus les criteres d'acces a partir du 1er janvier 2026. La norme Euro doit etre verifiee sur le certificat d'immatriculation, le COC ou les documents officiels du vehicule.",
+            "source": "https://lez.brussels/mytax/en/practical?tab=Agenda",
+            "date_verification": "2026-07-14",
+            "confiance": "eleve"
+          },
+          "anvers": {
+            "valeur": "inconnu",
+            "source": null,
+            "date_verification": null,
+            "confiance": "faible"
+          },
+          "gand": {
+            "valeur": "Gand indique que l'acces depend du carburant et de la norme Euro. Les diesels Euro 6 et Euro 5 ont acces libre, les diesels Euro 4 necessitent un paiement, et les conditions actuelles ne sont pas durcies avant reevaluation officielle.",
+            "source": "https://stad.gent/en/mobility-ghent/low-emission-zone-ghent/conditions-entering-low-emission-zone",
+            "date_verification": "2026-07-14",
+            "confiance": "eleve"
+          },
+          "verification_norme_euro": {
+            "valeur": "Ne pas deduire automatiquement la norme Euro depuis l'annee. Verifier le certificat d'immatriculation, le COC ou les donnees officielles du vehicule.",
+            "source": "https://lez.brussels/mytax/en/practical?tab=Agenda; https://stad.gent/en/mobility-ghent/low-emission-zone-ghent/conditions-entering-low-emission-zone",
+            "date_verification": "2026-07-14",
+            "confiance": "eleve"
+          }
+        },
+        "impact_revente": {
+          "valeur": "Impact qualitatif uniquement : une Serie 1 diesel Euro 5 ou plus ancienne peut etre moins attractive pour un acheteur circulant en LEZ, surtout autour de Bruxelles. La recommandation business prudente est de privilegier une norme Euro 6 verifiee.",
+          "source": "https://lez.brussels/mytax/en/practical?tab=Agenda; https://stad.gent/en/mobility-ghent/low-emission-zone-ghent/conditions-entering-low-emission-zone",
+          "date_verification": "2026-07-14",
+          "confiance": "moyen"
+        }
       },
       "business": {
         "marge_brute_realiste_min": {"valeur": null, "source": null, "date_verification": null, "confiance": "faible"},
@@ -397,7 +535,7 @@
         "profil_acheteur_principal": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"},
         "verdict_metier_provisoire": {"valeur": "inconnu", "source": null, "date_verification": null, "confiance": "faible"}
       },
-      "historique": {"date_creation": "2026-07-13", "derniere_mise_a_jour": "2026-07-13", "nombre_sources": 1, "version_donnees": "1.0", "derniere_verification": "2026-07-13"},
+      "historique": {"date_creation": "2026-07-13", "derniere_mise_a_jour": "2026-07-14", "nombre_sources": 3, "version_donnees": "1.1", "derniere_verification": "2026-07-14"},
       "stats": {"nombre_ventes_analysees": null, "prix_moyen_observe": null, "prix_min_observe": null, "prix_max_observe": null, "benefice_moyen": null, "taux_recommandation": null}
     },
     "mercedes_classe_a": {
