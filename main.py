@@ -33,24 +33,36 @@ from scanner.autoscout import (
 
 from database.database import (
     activer_scanner_global,
+    ajouter_favori,
     ajouter_annonce,
     ajouter_surveillance,
+    alerte_baisse_favori_deja_envoyee,
     analyser_pression_vendeur,
     avancer_lot_scanner_global,
     bilan_business,
     desactiver_scanner_global,
+    enregistrer_alerte_baisse_favori,
     enregistrer_message_business,
     enregistrer_opportunite_globale_envoyee,
     enregistrer_statistiques_scan,
     formater_filtres,
+    lister_favoris,
+    lister_favoris_actifs,
     lister_chat_ids_surveillance,
     lister_scanners_globaux_actifs,
     lister_surveillances,
     message_business_deja_envoye,
     mettre_a_jour_analyse_annonce,
+    mettre_a_jour_favori,
+    nombre_alertes_baisse_favori,
+    obtenir_favori,
+    obtenir_favori_par_id,
     opportunite_globale_deja_envoyee,
     signature_opportunite_globale,
+    signature_alerte_baisse_favori,
     statut_scanner_global,
+    supprimer_favori,
+    supprimer_favori_par_id,
     supprimer_surveillance
 )
 
@@ -62,6 +74,7 @@ from business.business_score import (
     donnees_business,
     identifiant_modele,
 )
+from business.negociation import calculer_negociation
 from scanner.deuxiememain import (
     analyser_lien as analyser_lien_2ememain,
     rechercher_voitures as rechercher_2ememain
@@ -82,6 +95,8 @@ CHEMIN_CONFIG_VEHICULES_BUSINESS = (
 )
 scan_en_cours = False
 scan_global_en_cours = False
+verification_favoris_en_cours = False
+INTERVALLE_VERIFICATION_FAVORIS_SECONDES = 3 * 60 * 60
 FILTRES_SURVEILLANCE = {
     "prix_min",
     "prix_max",
@@ -223,7 +238,25 @@ def clavier_opportunites():
 def clavier_favoris():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("❤️ Voir les favoris", callback_data="fav:list")],
-        [InlineKeyboardButton("🗑️ Supprimer un favori", callback_data="fav:delete")],
+        [InlineKeyboardButton("🗑️ Retirer un favori", callback_data="fav:delete")],
+        [InlineKeyboardButton("📉 Vérifier les prix maintenant", callback_data="fav:check")],
+        [InlineKeyboardButton("🏠 Accueil", callback_data="menu:home")],
+    ])
+
+
+def clavier_analyse_annonce(est_favori=False):
+    if est_favori:
+        premiere_ligne = [
+            InlineKeyboardButton("🗑 Retirer des favoris", callback_data="fav:remove_last")
+        ]
+    else:
+        premiere_ligne = [
+            InlineKeyboardButton("❤️ Ajouter aux favoris", callback_data="fav:add_last"),
+            InlineKeyboardButton("📉 Suivre le prix", callback_data="fav:add_last"),
+        ]
+
+    return InlineKeyboardMarkup([
+        premiere_ligne,
         [InlineKeyboardButton("🏠 Accueil", callback_data="menu:home")],
     ])
 
@@ -283,8 +316,8 @@ def texte_opportunites():
 def texte_favoris():
     return (
         "❤️ Favoris\n\n"
-        "La gestion complète des favoris arrive dans une prochaine étape. "
-        "Les commandes historiques restent disponibles."
+        "Sauvegarde les annonces intéressantes, suis leurs prix et vérifie "
+        "les baisses directement depuis ce menu."
     )
 
 
@@ -505,7 +538,34 @@ def formater_donnees_manquantes(voiture):
     return "Données manquantes : " + ", ".join(champs) + "."
 
 
-def formater_analyse_lien(voiture, analyse, business_score, infos_vendeur, fiche):
+def formater_negociation(negociation):
+    arguments = "\n".join(
+        f"- {argument}"
+        for argument in negociation.get("arguments", [])[:5]
+    )
+
+    if not arguments:
+        arguments = "- Aucun argument spécifique détecté"
+
+    return (
+        f"🤝 Score négociation : {negociation['score_negociation']}/100\n"
+        f"📈 Probabilité d'acceptation : {negociation['probabilite_acceptation']}%\n"
+        f"🎯 Offre de départ : {formater_prix(negociation['offre_depart'])}\n"
+        f"🤝 Prix conseillé : {formater_prix(negociation['prix_conseille'])}\n"
+        f"⛔ Prix maximum : {formater_prix(negociation['prix_maximum'])}\n"
+        f"💬 Verdict : {negociation['verdict']}\n"
+        f"📌 Arguments :\n{arguments}"
+    )
+
+
+def formater_analyse_lien(
+    voiture,
+    analyse,
+    business_score,
+    infos_vendeur,
+    fiche,
+    negociation,
+):
     infos_vendeur = infos_vendeur or {}
     score_vendeur = infos_vendeur.get("score", "Inconnu")
     verdict_vendeur = infos_vendeur.get("verdict", "aucun historique connu")
@@ -524,12 +584,13 @@ def formater_analyse_lien(voiture, analyse, business_score, infos_vendeur, fiche
         f"💰 Prix affiché : {formater_prix(voiture.get('prix'))}\n"
         f"📊 Prix marché estimé : {formater_prix(analyse['prix_marche'])}\n"
         f"💵 Bénéfice brut estimé : +{formater_prix(analyse['benefice'])}\n"
-        f"🎯 Prix de négociation conseillé : {formater_prix(analyse['prix_conseille'])}\n"
-        f"⛔ Prix maximum à payer : {formater_prix(analyse['prix_max'])}\n\n"
+        f"🎯 Prix de négociation conseillé : {formater_prix(negociation['prix_conseille'])}\n"
+        f"⛔ Prix maximum à payer : {formater_prix(negociation['prix_maximum'])}\n\n"
         f"⭐ Score IA : {analyse['score']}/100\n"
         f"🔥 Business Score : {business_score['score']}/100\n"
         f"{business_score['etoiles']} {business_score['verdict']}\n"
         f"⚠️ Niveau de risque : {niveau_risque}\n\n"
+        f"{formater_negociation(negociation)}\n\n"
         f"📅 Année : {voiture.get('annee', 'Inconnu')}\n"
         f"🛣️ Kilométrage : {extraire_kilometrage(voiture)}\n"
         f"⛽ Carburant : {voiture.get('carburant', 'Inconnu')}\n"
@@ -546,7 +607,7 @@ def formater_analyse_lien(voiture, analyse, business_score, infos_vendeur, fiche
     )
 
 
-def analyser_annonce_par_lien(lien):
+def analyser_annonce_par_lien_detail(lien):
     voiture = analyser_lien_plateforme(lien)
 
     if voiture.get("prix") in (None, "", "Inconnu"):
@@ -563,14 +624,35 @@ def analyser_annonce_par_lien(lien):
     )
     modele_id, fiche = fiche_modele_business(voiture)
     voiture["modele_id"] = modele_id
+    negociation = calculer_negociation(
+        voiture,
+        analyse,
+        infos_vendeur,
+        infos_vendeur.get("score") if infos_vendeur else None
+    )
 
-    return formater_analyse_lien(
+    texte = formater_analyse_lien(
         voiture,
         analyse,
         business_score,
         infos_vendeur,
-        fiche
+        fiche,
+        negociation,
     )
+
+    return {
+        "texte": texte,
+        "voiture": voiture,
+        "analyse": analyse,
+        "business_score": business_score,
+        "infos_vendeur": infos_vendeur,
+        "fiche": fiche,
+        "negociation": negociation,
+    }
+
+
+def analyser_annonce_par_lien(lien):
+    return analyser_annonce_par_lien_detail(lien)["texte"]
 
 
 def extraire_recherche_et_filtres(args):
@@ -1687,7 +1769,9 @@ async def analyser(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔎 Analyse de l'annonce en cours...")
 
     try:
-        texte = analyser_annonce_par_lien(lien)
+        resultat = analyser_annonce_par_lien_detail(lien)
+        texte = resultat["texte"]
+        context.user_data["derniere_analyse_annonce"] = resultat
     except ValueError as erreur:
         texte = f"❌ {erreur}"
     except RuntimeError as erreur:
@@ -1699,8 +1783,19 @@ async def analyser(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Détail : {erreur}"
         )
 
-    for message in decouper_messages([texte], limite=3900):
-        await update.message.reply_text(message)
+    messages = decouper_messages([texte], limite=3900)
+
+    for index, message in enumerate(messages):
+        kwargs = {}
+
+        if index == len(messages) - 1 and "resultat" in locals():
+            est_favori = obtenir_favori(
+                update.effective_chat.id,
+                resultat["voiture"]["lien"]
+            )
+            kwargs["reply_markup"] = clavier_analyse_annonce(bool(est_favori))
+
+        await update.message.reply_text(message, **kwargs)
 
 
 async def historique(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1714,6 +1809,197 @@ async def historique(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         formater_historique(analyser_pression_vendeur(identifiant))
     )
+
+
+def ajouter_favori_depuis_analyse(chat_id, resultat):
+    voiture = resultat["voiture"]
+    business_score = resultat["business_score"]
+    negociation = resultat["negociation"]
+
+    return ajouter_favori(
+        chat_id=chat_id,
+        lien=voiture["lien"],
+        modele=voiture.get("titre") or voiture.get("modele"),
+        prix=voiture.get("prix"),
+        prix_initial=voiture.get("prix"),
+        score_business=business_score["score"],
+        score_negociation=negociation["score_negociation"],
+    )
+
+
+def formater_liste_favoris(chat_id):
+    favoris = lister_favoris(chat_id)
+
+    if not favoris:
+        return "❤️ Favoris\n\nAucun favori actif pour le moment."
+
+    lignes = ["❤️ Favoris actifs\n"]
+
+    for index, favori in enumerate(favoris, start=1):
+        lignes.append(
+            f"{index}. {favori.get('modele') or 'Annonce'}\n"
+            f"💰 Prix : {formater_prix(favori.get('prix'))}\n"
+            f"🔥 Business Score : {favori.get('score_business') or 'Inconnu'}/100\n"
+            f"🤝 Négociation : {favori.get('score_negociation') or 'Inconnu'}/100\n"
+            f"🔗 {favori.get('lien')}\n"
+        )
+
+    return "\n".join(lignes)
+
+
+def clavier_liste_favoris(chat_id):
+    lignes = []
+
+    for favori in lister_favoris(chat_id)[:10]:
+        libelle = f"🗑 {favori.get('modele') or favori['id']}"
+        lignes.append([
+            InlineKeyboardButton(
+                libelle[:60],
+                callback_data=f"fav:remove_id:{favori['id']}"
+            )
+        ])
+
+    lignes.append([InlineKeyboardButton("📉 Vérifier les prix maintenant", callback_data="fav:check")])
+    lignes.append([InlineKeyboardButton("🏠 Accueil", callback_data="menu:home")])
+    return InlineKeyboardMarkup(lignes)
+
+
+def baisse_declenche_alerte(favori, nouveau_prix):
+    ancien_prix = extraire_nombre(favori.get("prix"))
+    nouveau_prix = extraire_nombre(nouveau_prix)
+
+    if ancien_prix is None or nouveau_prix is None:
+        return False
+
+    variation = nouveau_prix - ancien_prix
+
+    if variation >= 0:
+        return False
+
+    baisse = abs(variation)
+    pourcentage = (baisse / ancien_prix) * 100 if ancien_prix else 0
+
+    return (
+        baisse >= 500
+        or pourcentage >= 3
+        or nombre_alertes_baisse_favori(
+            favori["chat_id"],
+            favori["lien"]
+        ) > 0
+    )
+
+
+def formater_alerte_baisse_favori(favori, voiture, negociation, ancien_prix):
+    nouveau_prix = extraire_nombre(voiture.get("prix")) or 0
+    baisse = int(ancien_prix - nouveau_prix)
+    pourcentage = (baisse / ancien_prix) * 100 if ancien_prix else 0
+
+    return (
+        "📉 BAISSE DE PRIX\n\n"
+        f"🚗 {voiture.get('titre') or voiture.get('modele')}\n"
+        f"Ancien prix : {formater_prix(int(ancien_prix))}\n"
+        f"Nouveau prix : {formater_prix(int(nouveau_prix))}\n"
+        f"Baisse : {formater_prix(baisse)} (-{pourcentage:.1f} %)\n\n"
+        f"💬 Nouveau score négociation : {negociation['score_negociation']}/100\n"
+        f"🎯 Offre conseillée : {formater_prix(negociation['prix_conseille'])}\n"
+        f"🔗 {favori['lien']}"
+    )
+
+
+def analyser_favori_pour_prix(favori):
+    voiture = analyser_lien_plateforme(favori["lien"])
+    analyse = analyser_annonce(voiture)
+    business_score = calculer_business_score(
+        voiture,
+        analyse,
+        None,
+        PRIX_MAX_GLOBAL
+    )
+    negociation = calculer_negociation(voiture, analyse)
+    return voiture, analyse, business_score, negociation
+
+
+async def verifier_favoris_actifs(bot=None, chat_id_filtre=None):
+    alertes = []
+
+    for favori in lister_favoris_actifs():
+        if chat_id_filtre is not None and favori["chat_id"] != chat_id_filtre:
+            continue
+
+        try:
+            voiture, _analyse, business_score, negociation = analyser_favori_pour_prix(
+                favori
+            )
+        except Exception as erreur:
+            logger.warning(
+                "Erreur vérification favori %s : %s",
+                favori.get("lien"),
+                erreur
+            )
+            continue
+
+        ancien_prix = extraire_nombre(favori.get("prix"))
+        nouveau_prix = extraire_nombre(voiture.get("prix"))
+
+        if ancien_prix is None or nouveau_prix is None:
+            mettre_a_jour_favori(
+                favori["chat_id"],
+                favori["lien"],
+                prix=nouveau_prix,
+                score_business=business_score["score"],
+                score_negociation=negociation["score_negociation"],
+                modele=voiture.get("titre") or voiture.get("modele"),
+            )
+            continue
+
+        variation = int(nouveau_prix - ancien_prix)
+        signature = signature_alerte_baisse_favori(
+            favori["chat_id"],
+            favori["lien"],
+            int(nouveau_prix)
+        )
+
+        doit_alerter = (
+            baisse_declenche_alerte(favori, nouveau_prix)
+            and not alerte_baisse_favori_deja_envoyee(signature)
+        )
+
+        mettre_a_jour_favori(
+            favori["chat_id"],
+            favori["lien"],
+            prix=nouveau_prix,
+            score_business=business_score["score"],
+            score_negociation=negociation["score_negociation"],
+            modele=voiture.get("titre") or voiture.get("modele"),
+        )
+
+        if not doit_alerter:
+            continue
+
+        enregistrer_alerte_baisse_favori(
+            favori["chat_id"],
+            favori["lien"],
+            int(ancien_prix),
+            int(nouveau_prix),
+            variation,
+            signature,
+        )
+        texte = formater_alerte_baisse_favori(
+            favori,
+            voiture,
+            negociation,
+            ancien_prix
+        )
+        alertes.append({
+            "chat_id": favori["chat_id"],
+            "texte": texte,
+            "signature": signature,
+        })
+
+        if bot is not None:
+            await bot.send_message(chat_id=favori["chat_id"], text=texte)
+
+    return alertes
 
 
 async def scanner_global(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1781,6 +2067,21 @@ async def envoyer_messages_business(context: ContextTypes.DEFAULT_TYPE):
         )
 
         enregistrer_message_business(chat_id, date_envoi.isoformat())
+
+
+async def verifier_favoris_job(context: ContextTypes.DEFAULT_TYPE):
+    global verification_favoris_en_cours
+
+    if verification_favoris_en_cours:
+        logger.info("Vérification favoris déjà en cours, passage ignoré.")
+        return
+
+    verification_favoris_en_cours = True
+
+    try:
+        await verifier_favoris_actifs(context.bot)
+    finally:
+        verification_favoris_en_cours = False
 
 
 async def scan_global_business(context: ContextTypes.DEFAULT_TYPE):
@@ -2088,9 +2389,87 @@ async def interface_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     elif data == "opp:price_drops":
         await afficher_menu_callback(query, "📉 Baisses de prix\n\nLes baisses importantes déclenchent une nouvelle alerte.", clavier_opportunites())
     elif data == "fav:list":
-        await afficher_menu_callback(query, "❤️ Favoris\n\nAucun favori enregistré pour le moment.", clavier_favoris())
+        await afficher_menu_callback(
+            query,
+            formater_liste_favoris(chat_id),
+            clavier_liste_favoris(chat_id)
+        )
     elif data == "fav:delete":
-        await afficher_menu_callback(query, "🗑️ Supprimer un favori\n\nLa suppression par bouton sera ajoutée avec la gestion complète des favoris.", clavier_favoris())
+        await afficher_menu_callback(
+            query,
+            "🗑 Retirer un favori\n\nChoisis un favori à retirer.",
+            clavier_liste_favoris(chat_id)
+        )
+    elif data == "fav:add_last":
+        resultat = context.user_data.get("derniere_analyse_annonce")
+
+        if not resultat:
+            await afficher_menu_callback(
+                query,
+                "ℹ️ Analyse d'abord une annonce avant de l'ajouter aux favoris.",
+                clavier_favoris()
+            )
+            return
+
+        ajoute = ajouter_favori_depuis_analyse(chat_id, resultat)
+        texte = (
+            "❤️ Annonce ajoutée aux favoris et suivie pour les baisses de prix."
+            if ajoute
+            else "ℹ️ Cette annonce est déjà dans tes favoris."
+        )
+        await afficher_menu_callback(
+            query,
+            texte,
+            clavier_analyse_annonce(est_favori=True)
+        )
+    elif data == "fav:remove_last":
+        resultat = context.user_data.get("derniere_analyse_annonce")
+
+        if not resultat:
+            await afficher_menu_callback(
+                query,
+                "ℹ️ Aucun favori récent à retirer.",
+                clavier_favoris()
+            )
+            return
+
+        retire = supprimer_favori(chat_id, resultat["voiture"]["lien"])
+        texte = (
+            "🗑 Annonce retirée des favoris."
+            if retire
+            else "ℹ️ Cette annonce n'était pas dans tes favoris actifs."
+        )
+        await afficher_menu_callback(
+            query,
+            texte,
+            clavier_analyse_annonce(est_favori=False)
+        )
+    elif data.startswith("fav:remove_id:"):
+        favori_id = int(data.rsplit(":", 1)[1])
+        retire = supprimer_favori_par_id(chat_id, favori_id)
+        texte = (
+            "🗑 Favori retiré."
+            if retire
+            else "ℹ️ Favori introuvable ou déjà retiré."
+        )
+        await afficher_menu_callback(
+            query,
+            texte + "\n\n" + formater_liste_favoris(chat_id),
+            clavier_liste_favoris(chat_id)
+        )
+    elif data == "fav:check":
+        await afficher_menu_callback(
+            query,
+            "📉 Vérification des favoris en cours...",
+            clavier_favoris()
+        )
+        alertes = await verifier_favoris_actifs(context.bot, chat_id)
+
+        if not alertes:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="Aucune baisse de prix détectée sur tes favoris."
+            )
     elif data == "dash:summary":
         await afficher_menu_callback(query, generer_tableau_de_bord(chat_id), clavier_tableau_de_bord())
     elif data.startswith("settings:"):
@@ -2111,7 +2490,9 @@ async def gerer_reply_keyboard(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text("🔎 Analyse de l'annonce en cours...")
 
         try:
-            resultat = analyser_annonce_par_lien(texte)
+            resultat_analyse = analyser_annonce_par_lien_detail(texte)
+            resultat = resultat_analyse["texte"]
+            context.user_data["derniere_analyse_annonce"] = resultat_analyse
         except ValueError as erreur:
             resultat = f"❌ {erreur}"
         except RuntimeError as erreur:
@@ -2123,8 +2504,19 @@ async def gerer_reply_keyboard(update: Update, context: ContextTypes.DEFAULT_TYP
                 f"Détail : {erreur}"
             )
 
-        for message in decouper_messages([resultat], limite=3900):
-            await update.message.reply_text(message)
+        messages = decouper_messages([resultat], limite=3900)
+
+        for index, message in enumerate(messages):
+            kwargs = {}
+
+            if index == len(messages) - 1 and "resultat_analyse" in locals():
+                est_favori = obtenir_favori(
+                    update.effective_chat.id,
+                    resultat_analyse["voiture"]["lien"]
+                )
+                kwargs["reply_markup"] = clavier_analyse_annonce(bool(est_favori))
+
+            await update.message.reply_text(message, **kwargs)
         return
 
     if texte == "🏠 Accueil":
@@ -2166,6 +2558,11 @@ def planifier_scan(app):
         scan_global_business,
         interval=INTERVALLE_SCAN_GLOBAL_SECONDES,
         first=INTERVALLE_SCAN_GLOBAL_SECONDES
+    )
+    job_queue.run_repeating(
+        verifier_favoris_job,
+        interval=INTERVALLE_VERIFICATION_FAVORIS_SECONDES,
+        first=INTERVALLE_VERIFICATION_FAVORIS_SECONDES
     )
     return True
 

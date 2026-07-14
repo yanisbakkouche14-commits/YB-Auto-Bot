@@ -140,6 +140,37 @@ CREATE TABLE IF NOT EXISTS opportunites_globales_envoyees (
 )
 """)
 
+curseur.execute("""
+CREATE TABLE IF NOT EXISTS favoris (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL,
+    lien TEXT NOT NULL,
+    modele TEXT,
+    prix INTEGER,
+    prix_initial INTEGER,
+    score_business INTEGER,
+    score_negociation INTEGER,
+    date_ajout TEXT NOT NULL,
+    date_derniere_verification TEXT,
+    actif INTEGER NOT NULL DEFAULT 1,
+    UNIQUE(chat_id, lien)
+)
+""")
+
+curseur.execute("""
+CREATE TABLE IF NOT EXISTS alertes_baisse_favoris (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL,
+    lien TEXT NOT NULL,
+    ancien_prix INTEGER,
+    nouveau_prix INTEGER NOT NULL,
+    variation INTEGER NOT NULL,
+    signature TEXT NOT NULL,
+    date_alerte TEXT NOT NULL,
+    UNIQUE(signature)
+)
+""")
+
 connexion.commit()
 
 
@@ -1093,3 +1124,258 @@ def enregistrer_opportunite_globale_envoyee(
         return True
     except sqlite3.IntegrityError:
         return False
+
+
+def ajouter_favori(
+    chat_id,
+    lien,
+    modele=None,
+    prix=None,
+    prix_initial=None,
+    score_business=None,
+    score_negociation=None,
+):
+    maintenant = _date_iso_maintenant()
+    prix = _prix_numerique(prix)
+    prix_initial = _prix_numerique(prix_initial) or prix
+
+    try:
+        curseur.execute(
+            """
+            INSERT INTO favoris (
+                chat_id,
+                lien,
+                modele,
+                prix,
+                prix_initial,
+                score_business,
+                score_negociation,
+                date_ajout,
+                date_derniere_verification,
+                actif
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            """,
+            (
+                chat_id,
+                lien,
+                modele,
+                prix,
+                prix_initial,
+                score_business,
+                score_negociation,
+                maintenant,
+                maintenant,
+            )
+        )
+        connexion.commit()
+        return True
+    except sqlite3.IntegrityError:
+        curseur.execute(
+            """
+            UPDATE favoris
+            SET actif = 1,
+                modele = COALESCE(?, modele),
+                prix = COALESCE(?, prix),
+                prix_initial = COALESCE(prix_initial, ?),
+                score_business = COALESCE(?, score_business),
+                score_negociation = COALESCE(?, score_negociation),
+                date_derniere_verification = ?
+            WHERE chat_id = ? AND lien = ? AND actif = 0
+            """,
+            (
+                modele,
+                prix,
+                prix_initial,
+                score_business,
+                score_negociation,
+                maintenant,
+                chat_id,
+                lien,
+            )
+        )
+        connexion.commit()
+        return curseur.rowcount > 0
+
+
+def supprimer_favori(chat_id, lien):
+    curseur.execute(
+        """
+        UPDATE favoris
+        SET actif = 0
+        WHERE chat_id = ? AND lien = ? AND actif = 1
+        """,
+        (chat_id, lien)
+    )
+    connexion.commit()
+    return curseur.rowcount > 0
+
+
+def supprimer_favori_par_id(chat_id, favori_id):
+    curseur.execute(
+        """
+        UPDATE favoris
+        SET actif = 0
+        WHERE chat_id = ? AND id = ? AND actif = 1
+        """,
+        (chat_id, favori_id)
+    )
+    connexion.commit()
+    return curseur.rowcount > 0
+
+
+def _favori_depuis_ligne(ligne):
+    colonnes = [description[0] for description in curseur.description]
+    return dict(zip(colonnes, ligne))
+
+
+def lister_favoris(chat_id, actifs_seulement=True):
+    requete = """
+        SELECT *
+        FROM favoris
+        WHERE chat_id = ?
+    """
+    parametres = [chat_id]
+
+    if actifs_seulement:
+        requete += " AND actif = 1"
+
+    requete += " ORDER BY date_ajout DESC, id DESC"
+    curseur.execute(requete, parametres)
+    return [_favori_depuis_ligne(ligne) for ligne in curseur.fetchall()]
+
+
+def lister_favoris_actifs():
+    curseur.execute(
+        """
+        SELECT *
+        FROM favoris
+        WHERE actif = 1
+        ORDER BY chat_id, date_ajout DESC
+        """
+    )
+    return [_favori_depuis_ligne(ligne) for ligne in curseur.fetchall()]
+
+
+def obtenir_favori(chat_id, lien):
+    curseur.execute(
+        """
+        SELECT *
+        FROM favoris
+        WHERE chat_id = ? AND lien = ?
+        """,
+        (chat_id, lien)
+    )
+    ligne = curseur.fetchone()
+    return _favori_depuis_ligne(ligne) if ligne else None
+
+
+def obtenir_favori_par_id(chat_id, favori_id):
+    curseur.execute(
+        """
+        SELECT *
+        FROM favoris
+        WHERE chat_id = ? AND id = ?
+        """,
+        (chat_id, favori_id)
+    )
+    ligne = curseur.fetchone()
+    return _favori_depuis_ligne(ligne) if ligne else None
+
+
+def mettre_a_jour_favori(
+    chat_id,
+    lien,
+    prix=None,
+    score_business=None,
+    score_negociation=None,
+    modele=None,
+):
+    curseur.execute(
+        """
+        UPDATE favoris
+        SET prix = COALESCE(?, prix),
+            modele = COALESCE(?, modele),
+            score_business = COALESCE(?, score_business),
+            score_negociation = COALESCE(?, score_negociation),
+            date_derniere_verification = ?
+        WHERE chat_id = ? AND lien = ?
+        """,
+        (
+            _prix_numerique(prix),
+            modele,
+            score_business,
+            score_negociation,
+            _date_iso_maintenant(),
+            chat_id,
+            lien,
+        )
+    )
+    connexion.commit()
+    return curseur.rowcount > 0
+
+
+def signature_alerte_baisse_favori(chat_id, lien, nouveau_prix):
+    return f"{chat_id}|{lien}|{nouveau_prix}"
+
+
+def alerte_baisse_favori_deja_envoyee(signature):
+    curseur.execute(
+        """
+        SELECT 1
+        FROM alertes_baisse_favoris
+        WHERE signature = ?
+        """,
+        (signature,)
+    )
+    return curseur.fetchone() is not None
+
+
+def enregistrer_alerte_baisse_favori(
+    chat_id,
+    lien,
+    ancien_prix,
+    nouveau_prix,
+    variation,
+    signature,
+):
+    try:
+        curseur.execute(
+            """
+            INSERT INTO alertes_baisse_favoris (
+                chat_id,
+                lien,
+                ancien_prix,
+                nouveau_prix,
+                variation,
+                signature,
+                date_alerte
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                chat_id,
+                lien,
+                ancien_prix,
+                nouveau_prix,
+                variation,
+                signature,
+                _date_iso_maintenant(),
+            )
+        )
+        connexion.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+
+
+def nombre_alertes_baisse_favori(chat_id, lien):
+    curseur.execute(
+        """
+        SELECT COUNT(*)
+        FROM alertes_baisse_favoris
+        WHERE chat_id = ? AND lien = ?
+        """,
+        (chat_id, lien)
+    )
+    return curseur.fetchone()[0]
