@@ -1,6 +1,8 @@
+import json
 import logging
 import os
 import re
+from datetime import datetime
 from urllib.parse import quote_plus, urljoin
 
 import requests
@@ -11,9 +13,21 @@ BASE_URL = "https://www.facebook.com"
 SEARCH_URL = f"{BASE_URL}/marketplace/search/"
 MAX_ANNONCES = 20
 TIMEOUT = 10
+SEUIL_ECHECS = 3
+TEST_SANTE_RECHERCHE = "golf"
 
 logger = logging.getLogger(__name__)
-_DESACTIVE = False
+
+_ETAT = {
+    "actif": True,
+    "desactive_temporairement": False,
+    "derniere_reussite": None,
+    "derniere_erreur": None,
+    "echecs_consecutifs": 0,
+    "notification_panne_envoyee": False,
+    "notification_retour_envoyee": False,
+    "retablissement_a_notifier": False,
+}
 
 HEADERS = {
     "User-Agent": (
@@ -22,6 +36,82 @@ HEADERS = {
     ),
     "Accept-Language": "fr-BE,fr;q=0.9,en;q=0.8",
 }
+
+
+class MarketplaceIndisponible(RuntimeError):
+    pass
+
+
+def _maintenant():
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def etat_marketplace():
+    return dict(_ETAT)
+
+
+def reinitialiser_etat_marketplace():
+    _ETAT.update({
+        "actif": True,
+        "desactive_temporairement": False,
+        "derniere_reussite": None,
+        "derniere_erreur": None,
+        "echecs_consecutifs": 0,
+        "notification_panne_envoyee": False,
+        "notification_retour_envoyee": False,
+        "retablissement_a_notifier": False,
+    })
+
+
+def _enregistrer_reussite(etait_desactive=None):
+    if etait_desactive is None:
+        etait_desactive = _ETAT["desactive_temporairement"]
+
+    _ETAT.update({
+        "actif": True,
+        "desactive_temporairement": False,
+        "derniere_reussite": _maintenant(),
+        "derniere_erreur": None,
+        "echecs_consecutifs": 0,
+    })
+
+    if etait_desactive:
+        _ETAT["notification_retour_envoyee"] = False
+        _ETAT["notification_panne_envoyee"] = False
+        _ETAT["retablissement_a_notifier"] = True
+
+
+def _enregistrer_echec(erreur):
+    _ETAT["derniere_erreur"] = str(erreur)
+    _ETAT["echecs_consecutifs"] += 1
+    logger.warning("Facebook Marketplace erreur: %s", erreur)
+
+    if _ETAT["echecs_consecutifs"] >= SEUIL_ECHECS:
+        _ETAT["actif"] = False
+        _ETAT["desactive_temporairement"] = True
+
+
+def panne_a_notifier():
+    return (
+        _ETAT["desactive_temporairement"]
+        and not _ETAT["notification_panne_envoyee"]
+    )
+
+
+def retour_a_notifier():
+    return (
+        _ETAT["retablissement_a_notifier"]
+        and not _ETAT["notification_retour_envoyee"]
+    )
+
+
+def marquer_notification_panne_envoyee():
+    _ETAT["notification_panne_envoyee"] = True
+
+
+def marquer_notification_retour_envoyee():
+    _ETAT["notification_retour_envoyee"] = True
+    _ETAT["retablissement_a_notifier"] = False
 
 
 def _session():
@@ -46,8 +136,8 @@ def _nombre(texte):
 
 def _prix(texte):
     match = re.search(
-        r"(\d{1,3}(?:[\s\.\u00a0]\d{3})+|\d{3,6})\s*(?:€|eur|â‚¬)|"
-        r"(?:€|eur|â‚¬)\s*(\d{1,3}(?:[\s\.\u00a0]\d{3})+|\d{3,6})",
+        r"(\d{1,3}(?:[\s\.\u00a0]\d{3})+|\d{3,6})\s*(?:€|eur|â‚¬|Ã¢â€šÂ¬)|"
+        r"(?:€|eur|â‚¬|Ã¢â€šÂ¬)\s*(\d{1,3}(?:[\s\.\u00a0]\d{3})+|\d{3,6})",
         texte or "",
         re.IGNORECASE
     )
@@ -88,6 +178,7 @@ def _ville(texte):
         "Bruxelles",
         "Charleroi",
         "Liège",
+        "LiÃ¨ge",
         "Liege",
         "Li?ge",
         "Namur",
@@ -100,25 +191,124 @@ def _ville(texte):
 
     for ville in villes:
         if ville.lower() in (texte or "").lower():
-            return "Liège" if ville == "Liege" else ville
+            return "Liège" if ville in ("Liege", "LiÃ¨ge") else ville
 
     return "Belgique"
 
 
-def _cartes(soup):
-    selecteurs = (
-        "a[href*='/marketplace/item/']",
-        "[role='article']",
-        "div[data-testid*='marketplace']",
-    )
-    cartes = []
+def _detecter_blocage(soup, html):
+    texte = soup.get_text(" ", strip=True).lower()
+    url_login = "login" in html.lower() and "marketplace" not in texte
+
+    if "checkpoint" in html.lower() or "checkpoint" in texte:
+        raise MarketplaceIndisponible("checkpoint Facebook detecte")
+
+    if "captcha" in texte or "captcha" in html.lower():
+        raise MarketplaceIndisponible("captcha Facebook detecte")
+
+    if (
+        url_login
+        or "connectez-vous" in texte
+        or "log in to facebook" in texte
+        or "se connecter" in texte
+    ):
+        raise MarketplaceIndisponible("page de login Facebook detectee")
+
+    if not texte.strip():
+        raise MarketplaceIndisponible("page vide")
+
+
+def _annonce(titre, texte, lien, modele):
+    titre = titre or modele
+    ville = _ville(texte)
+
+    return {
+        "source": "Facebook Marketplace",
+        "pays": "Belgique",
+        "modele": titre,
+        "titre": titre,
+        "prix": _prix(texte),
+        "kilometrage": _kilometrage(texte),
+        "annee": _annee(texte),
+        "ville": ville,
+        "localisation": ville,
+        "lien": lien,
+    }
+
+
+def _extraire_donnees_structurees(soup, modele):
+    annonces = []
+
+    for script in soup.select("script[type='application/ld+json']"):
+        try:
+            donnees = json.loads(script.get_text(" ", strip=True))
+        except json.JSONDecodeError:
+            continue
+
+        items = donnees if isinstance(donnees, list) else [donnees]
+
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+
+            lien = item.get("url")
+            titre = item.get("name")
+            texte = " ".join(
+                str(valeur)
+                for valeur in (
+                    titre,
+                    item.get("description"),
+                    item.get("price"),
+                    item.get("offers", {}).get("price")
+                    if isinstance(item.get("offers"), dict) else None,
+                )
+                if valeur
+            )
+
+            if lien and titre:
+                annonces.append(_annonce(titre, texte, urljoin(BASE_URL, lien), modele))
+
+    return annonces
+
+
+def _extraire_selecteurs(soup, modele, selecteurs):
+    annonces = []
+    liens_vus = set()
 
     for selecteur in selecteurs:
-        for element in soup.select(selecteur):
-            if element not in cartes:
-                cartes.append(element)
+        for carte in soup.select(selecteur):
+            lien_element = (
+                carte
+                if getattr(carte, "name", None) == "a"
+                else carte.select_one("a[href*='/marketplace/item/']")
+            )
+            lien = urljoin(BASE_URL, lien_element.get("href")) if lien_element else ""
+            texte = carte.get_text(" ", strip=True)
 
-    return cartes
+            if not lien or len(texte) < 8 or lien in liens_vus:
+                continue
+
+            liens_vus.add(lien)
+            titre = _titre(carte, texte, modele)
+            annonces.append(_annonce(titre, texte, lien, modele))
+
+            if len(annonces) >= MAX_ANNONCES:
+                return annonces
+
+    return annonces
+
+
+def _extraire_navigateur_automatise(_modele):
+    try:
+        import playwright.sync_api  # noqa: F401
+    except Exception:
+        return []
+
+    logger.info(
+        "Playwright disponible, mais le navigateur automatise Marketplace "
+        "n'est pas active dans cette version pour eviter login/captcha."
+    )
+    return []
 
 
 def _titre(carte, texte, modele):
@@ -128,23 +318,47 @@ def _titre(carte, texte, modele):
         if element:
             titre = element.get_text(" ", strip=True)
 
-            if titre and "€" not in titre:
+            if titre and "€" not in titre and "â‚¬" not in titre:
                 return titre[:120]
 
     lignes = [ligne.strip() for ligne in re.split(r"\s{2,}|\n|\r", texte) if ligne.strip()]
 
     for ligne in lignes:
-        if "€" not in ligne and len(ligne) > 4:
+        if "€" not in ligne and "â‚¬" not in ligne and len(ligne) > 4:
             return ligne[:120]
 
     return modele
 
 
-def rechercher_voitures(modele):
-    global _DESACTIVE
+def _extraire_annonces(html, modele):
+    soup = BeautifulSoup(html, "html.parser")
+    _detecter_blocage(soup, html)
 
-    if _DESACTIVE:
-        logger.warning("Facebook Marketplace desactive pour cette session.")
+    strategies = (
+        _extraire_donnees_structurees(soup, modele),
+        _extraire_selecteurs(
+            soup,
+            modele,
+            ("a[href*='/marketplace/item/']",),
+        ),
+        _extraire_selecteurs(
+            soup,
+            modele,
+            ("[role='article']", "div[data-testid*='marketplace']"),
+        ),
+        _extraire_navigateur_automatise(modele),
+    )
+
+    for annonces in strategies:
+        if annonces:
+            return annonces[:MAX_ANNONCES]
+
+    raise MarketplaceIndisponible("structure HTML Marketplace inconnue")
+
+
+def rechercher_voitures(modele, ignorer_desactivation=False):
+    if _ETAT["desactive_temporairement"] and not ignorer_desactivation:
+        logger.warning("Facebook Marketplace desactive temporairement.")
         return []
 
     url = _construire_url(modele)
@@ -152,44 +366,35 @@ def rechercher_voitures(modele):
     try:
         reponse = _session().get(url, timeout=TIMEOUT)
         reponse.raise_for_status()
+        annonces = _extraire_annonces(reponse.text, modele)
+        _enregistrer_reussite()
+        return annonces
     except requests.exceptions.Timeout as erreur:
-        logger.warning("Facebook Marketplace timeout: %s", erreur)
-        _DESACTIVE = True
+        _enregistrer_echec(f"timeout: {erreur}")
         return []
     except requests.exceptions.RequestException as erreur:
-        logger.warning("Facebook Marketplace inaccessible: %s", erreur)
-        _DESACTIVE = True
+        _enregistrer_echec(f"inaccessible: {erreur}")
+        return []
+    except MarketplaceIndisponible as erreur:
+        _enregistrer_echec(erreur)
         return []
 
-    soup = BeautifulSoup(reponse.text, "html.parser")
-    annonces = []
-    liens_vus = set()
 
-    for carte in _cartes(soup):
-        lien_element = carte if carte.name == "a" else carte.select_one("a[href*='/marketplace/item/']")
-        lien = urljoin(BASE_URL, lien_element.get("href")) if lien_element else ""
-        texte = carte.get_text(" ", strip=True)
+def tester_sante():
+    etait_desactive = _ETAT["desactive_temporairement"]
 
-        if not lien or len(texte) < 8 or lien in liens_vus:
-            continue
+    annonces = rechercher_voitures(
+        TEST_SANTE_RECHERCHE,
+        ignorer_desactivation=True
+    )
+    succes = bool(annonces)
 
-        liens_vus.add(lien)
-        titre = _titre(carte, texte, modele)
+    if succes:
+        _enregistrer_reussite(etait_desactive=etait_desactive)
+        return True
 
-        annonces.append({
-            "source": "Facebook Marketplace",
-            "pays": "Belgique",
-            "modele": titre,
-            "titre": titre,
-            "prix": _prix(texte),
-            "kilometrage": _kilometrage(texte),
-            "annee": _annee(texte),
-            "ville": _ville(texte),
-            "localisation": _ville(texte),
-            "lien": lien,
-        })
+    if etait_desactive:
+        _ETAT["desactive_temporairement"] = True
+        _ETAT["actif"] = False
 
-        if len(annonces) >= MAX_ANNONCES:
-            break
-
-    return annonces
+    return False

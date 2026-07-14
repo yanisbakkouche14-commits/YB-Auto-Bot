@@ -108,15 +108,25 @@ def formater_sources(sources):
     blocs = ["📡 État des sources", ""]
 
     for source in sources:
-        blocs.append(
-            f"🌐 {source['source']}\n"
-            f"- Annonces récupérées : {source['annonces_recuperees']}\n"
-            f"- Annonces pertinentes : {source['annonces_pertinentes']}\n"
-            f"- Bonnes affaires : {source['bonnes_affaires']}\n"
-            f"- Erreurs : {source['erreurs']}\n"
-            f"- Temps moyen : {source['temps_moyen'] or 'Inconnu'} s\n"
-            f"- Dernière réussite : {source['derniere_reussite'] or 'Inconnu'}\n"
-            f"- Dernier échec : {source['dernier_echec'] or 'Inconnu'}"
-        )
+        lignes = [
+            f"🌐 {source['source']}",
+            f"- Annonces récupérées : {source['annonces_recuperees']}",
+            f"- Annonces pertinentes : {source['annonces_pertinentes']}",
+            f"- Bonnes affaires : {source['bonnes_affaires']}",
+            f"- Erreurs : {source['erreurs']}",
+            f"- Temps moyen : {source['temps_moyen'] or 'Inconnu'} s",
+            f"- Dernière réussite : {source['derniere_reussite'] or 'Inconnu'}",
+            f"- Dernier échec : {source['dernier_echec'] or 'Inconnu'}",
+        ]
+
+        if "statut" in source:
+            lignes.append(f"- Statut : {source['statut']}")
+
+        if "echecs_consecutifs" in source:
+            lignes.append(
+                f"- Échecs consécutifs : {source['echecs_consecutifs']}"
+            )
+
+        blocs.append("\n".join(lignes))
 
     return "\n\n".join(blocs)

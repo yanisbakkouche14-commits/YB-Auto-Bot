@@ -92,7 +92,15 @@ from scanner.deuxiememain import (
     rechercher_voitures as rechercher_2ememain
 )
 from scanner.aggregateur import rechercher_partout
-from scanner.marketplace import rechercher_voitures as rechercher_marketplace
+from scanner.marketplace import (
+    etat_marketplace,
+    marquer_notification_panne_envoyee,
+    marquer_notification_retour_envoyee,
+    panne_a_notifier,
+    rechercher_voitures as rechercher_marketplace,
+    retour_a_notifier,
+    tester_sante,
+)
 
 
 SCORE_ALERTE_MINIMUM = 80
@@ -1794,6 +1802,28 @@ def formater_resultat_marketplace(modele, annonces):
     return "\n\n".join(blocs)
 
 
+def source_marketplace_etat():
+    etat = etat_marketplace()
+    statut = (
+        "désactivé temporairement"
+        if etat["desactive_temporairement"]
+        else "actif"
+    )
+
+    return {
+        "source": "Facebook Marketplace",
+        "annonces_recuperees": 0,
+        "annonces_pertinentes": 0,
+        "bonnes_affaires": 0,
+        "erreurs": etat["echecs_consecutifs"],
+        "temps_moyen": None,
+        "derniere_reussite": etat["derniere_reussite"],
+        "dernier_echec": etat["derniere_erreur"],
+        "statut": statut,
+        "echecs_consecutifs": etat["echecs_consecutifs"],
+    }
+
+
 async def marketplace(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) == 0:
         await update.message.reply_text("❌ Utilisation : /marketplace Golf GTI")
@@ -2922,7 +2952,7 @@ async def interface_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     elif data == "dash:sources":
         await afficher_menu_callback(
             query,
-            formater_sources(stats_sources()),
+            formater_sources(stats_sources() + [source_marketplace_etat()]),
             clavier_tableau_de_bord()
         )
     elif data.startswith("settings:"):
@@ -3017,6 +3047,41 @@ async def gerer_reply_keyboard(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text(texte_aide(), reply_markup=clavier_aide())
 
 
+def chat_ids_notifications_marketplace():
+    chat_ids = set(lister_chat_ids_surveillance())
+
+    for scanner in lister_scanners_globaux_actifs():
+        chat_ids.add(scanner["chat_id"])
+
+    return sorted(chat_ids)
+
+
+async def verifier_sante_marketplace(context: ContextTypes.DEFAULT_TYPE):
+    tester_sante()
+    chat_ids = chat_ids_notifications_marketplace()
+
+    if panne_a_notifier():
+        for chat_id in chat_ids:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=(
+                    "⚠️ Facebook Marketplace est temporairement indisponible.\n"
+                    "Les autres plateformes restent actives."
+                )
+            )
+
+        marquer_notification_panne_envoyee()
+
+    if retour_a_notifier():
+        for chat_id in chat_ids:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="✅ Facebook Marketplace est de nouveau disponible."
+            )
+
+        marquer_notification_retour_envoyee()
+
+
 def planifier_scan(app):
     job_queue = getattr(app, "job_queue", None)
 
@@ -3045,6 +3110,11 @@ def planifier_scan(app):
         verifier_favoris_job,
         interval=INTERVALLE_VERIFICATION_FAVORIS_SECONDES,
         first=INTERVALLE_VERIFICATION_FAVORIS_SECONDES
+    )
+    job_queue.run_repeating(
+        verifier_sante_marketplace,
+        interval=3600,
+        first=3600
     )
     return True
 
