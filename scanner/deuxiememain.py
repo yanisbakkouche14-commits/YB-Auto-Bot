@@ -63,7 +63,7 @@ def _titre_correspond(recherche, titre):
 
 
 def _extraire_prix(texte):
-    match = re.search(r"€\s*([\d\.\s]+),-", texte)
+    match = re.search(r"(?:€|â‚¬)\s*([\d\.\s]+)(?:,-)?", texte)
 
     if not match:
         return "Inconnu"
@@ -105,6 +105,123 @@ def _extraire_attributs(carte, titre):
             kilometrage = int(valeur) if valeur else "Inconnu"
 
     return annee, kilometrage
+
+
+def _premiere_valeur(*valeurs, defaut="Inconnu"):
+    for valeur in valeurs:
+        if valeur not in (None, "", [], {}):
+            return valeur
+
+    return defaut
+
+
+def _extraire_meta(soup, nom):
+    selecteurs = (
+        {"property": nom},
+        {"name": nom},
+    )
+
+    for attributs in selecteurs:
+        element = soup.find("meta", attrs=attributs)
+
+        if element and element.get("content"):
+            return element["content"].strip()
+
+    return None
+
+
+def _extraire_prix_page(soup):
+    for selecteur in (
+        "[data-testid*='price']",
+        ".Listing-price",
+        ".hz-Listing-price",
+    ):
+        element = soup.select_one(selecteur)
+
+        if element:
+            prix = _extraire_prix(element.get_text(" ", strip=True))
+
+            if isinstance(prix, int):
+                return prix
+
+    return _extraire_prix(soup.get_text(" ", strip=True))
+
+
+def _extraire_attribut_texte(texte, libelles):
+    bornes = (
+        "Marque",
+        "Carburant",
+        "Fuel",
+        "Boite",
+        "BoÃ®te",
+        "Transmission",
+        "Localisation",
+        "Ville",
+        "KilomÃ©trage",
+        "Kilometrage",
+        "AnnÃ©e",
+        "Annee",
+    )
+
+    for libelle in libelles:
+        motif = (
+            rf"{libelle}\s*[:\-]?\s*(.+?)"
+            rf"(?=\s+(?:{'|'.join(bornes)})\s*[:\-]?|$)"
+        )
+        match = re.search(motif, texte, re.IGNORECASE)
+
+        if match:
+            valeur = match.group(1).strip()
+            return re.split(r"\s{2,}|\n|\r", valeur)[0].strip()
+
+    return "Inconnu"
+
+
+def analyser_lien(lien):
+    try:
+        reponse = requests.get(lien, headers=HEADERS, timeout=15)
+        reponse.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        raise RuntimeError(f"2ememain inaccessible: {e}") from e
+
+    soup = BeautifulSoup(reponse.text, "html.parser")
+    titre = _premiere_valeur(
+        _extraire_meta(soup, "og:title"),
+        soup.find("h1").get_text(" ", strip=True) if soup.find("h1") else None,
+        soup.title.get_text(" ", strip=True) if soup.title else None
+    )
+    description = _premiere_valeur(
+        _extraire_meta(soup, "og:description"),
+        _extraire_meta(soup, "description"),
+        defaut=""
+    )
+    texte = soup.get_text(" ", strip=True)
+    annee, kilometrage = _extraire_attributs(soup, titre)
+
+    return {
+        "marque": _extraire_attribut_texte(texte, ("Marque",)),
+        "modele": titre,
+        "annee": annee,
+        "kilometrage": kilometrage,
+        "carburant": _extraire_attribut_texte(texte, ("Carburant", "Fuel")),
+        "boite": _extraire_attribut_texte(
+            texte,
+            ("Boite", "BoÃ®te", "Transmission")
+        ),
+        "prix": _extraire_prix_page(soup),
+        "titre": titre,
+        "description": description,
+        "ville": _premiere_valeur(
+            _extraire_attribut_texte(texte, ("Localisation", "Ville")),
+            defaut="Belgique"
+        ),
+        "localisation": _premiere_valeur(
+            _extraire_attribut_texte(texte, ("Localisation", "Ville")),
+            defaut="Belgique"
+        ),
+        "source": "2ememain",
+        "lien": lien,
+    }
 
 
 def rechercher_voitures(modele):

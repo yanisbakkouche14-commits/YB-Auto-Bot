@@ -299,6 +299,142 @@ def _extraire_voitures(html, recherche):
     return voitures
 
 
+def _liste_json_ld(soup):
+    objets = []
+
+    for script in soup.find_all("script", type="application/ld+json"):
+        if not script.string:
+            continue
+
+        try:
+            data = json.loads(script.string)
+        except (TypeError, json.JSONDecodeError):
+            continue
+
+        if isinstance(data, list):
+            objets.extend(data)
+        else:
+            objets.append(data)
+
+    return objets
+
+
+def _aplatir_json_ld(objet):
+    if isinstance(objet, dict):
+        yield objet
+
+        for valeur in objet.values():
+            yield from _aplatir_json_ld(valeur)
+    elif isinstance(objet, list):
+        for item in objet:
+            yield from _aplatir_json_ld(item)
+
+
+def _premiere_valeur(*valeurs, defaut="Inconnu"):
+    for valeur in valeurs:
+        if valeur not in (None, "", [], {}):
+            return valeur
+
+    return defaut
+
+
+def _extraire_prix_offre(offers):
+    if isinstance(offers, list):
+        offers = offers[0] if offers else {}
+
+    if not isinstance(offers, dict):
+        return "Inconnu"
+
+    prix = offers.get("price") or offers.get("priceSpecification", {}).get("price")
+
+    if isinstance(prix, int):
+        return prix
+
+    chiffres = re.sub(r"\D", "", str(prix or ""))
+    return int(chiffres) if chiffres else "Inconnu"
+
+
+def _extraire_adresse(offers):
+    if isinstance(offers, list):
+        offers = offers[0] if offers else {}
+
+    seller = offers.get("seller", {}) if isinstance(offers, dict) else {}
+    address = seller.get("address", {}) if isinstance(seller, dict) else {}
+
+    if isinstance(address, dict):
+        return _premiere_valeur(
+            address.get("addressLocality"),
+            address.get("addressRegion"),
+            defaut="Belgique"
+        )
+
+    return "Belgique"
+
+
+def analyser_lien(lien):
+    try:
+        reponse = requests.get(lien, headers=HEADERS, timeout=15)
+        reponse.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        raise RuntimeError(f"AutoScout24 inaccessible: {e}") from e
+
+    soup = BeautifulSoup(reponse.text, "html.parser")
+    objets = list(_aplatir_json_ld(_liste_json_ld(soup)))
+    vehicule = next(
+        (
+            obj for obj in objets
+            if obj.get("@type") in {"Car", "Vehicle", "Product"}
+        ),
+        {}
+    )
+
+    offers = vehicule.get("offers", {}) if isinstance(vehicule, dict) else {}
+    titre = _premiere_valeur(
+        vehicule.get("name") if isinstance(vehicule, dict) else None,
+        soup.find("h1").get_text(" ", strip=True) if soup.find("h1") else None,
+        soup.title.get_text(" ", strip=True) if soup.title else None
+    )
+    description = _premiere_valeur(
+        vehicule.get("description") if isinstance(vehicule, dict) else None,
+        soup.find("meta", attrs={"name": "description"}).get("content")
+        if soup.find("meta", attrs={"name": "description"}) else None,
+        defaut=""
+    )
+    marque = vehicule.get("brand", {}) if isinstance(vehicule, dict) else {}
+
+    if isinstance(marque, dict):
+        marque = marque.get("name")
+
+    kilometrage = _extraire_kilometrage(
+        vehicule.get("mileageFromOdometer") if isinstance(vehicule, dict) else None
+    )
+    annee = _extraire_annee(vehicule) if isinstance(vehicule, dict) else "Inconnu"
+
+    return {
+        "marque": _premiere_valeur(marque),
+        "modele": _premiere_valeur(
+            vehicule.get("model") if isinstance(vehicule, dict) else None,
+            titre
+        ),
+        "annee": annee,
+        "kilometrage": kilometrage,
+        "carburant": _premiere_valeur(
+            vehicule.get("fuelType") if isinstance(vehicule, dict) else None
+        ),
+        "boite": _premiere_valeur(
+            vehicule.get("vehicleTransmission") if isinstance(vehicule, dict) else None,
+            defaut="Inconnue"
+        ),
+        "prix": _extraire_prix_offre(offers),
+        "titre": titre,
+        "description": description,
+        "ville": _extraire_adresse(offers),
+        "localisation": _extraire_adresse(offers),
+        "source": "AutoScout24",
+        "lien": lien,
+    }
+
+
 def rechercher_voitures(modele):
 
     for url in _construire_urls(modele):

@@ -7,6 +7,7 @@ import tempfile
 import time as time_module
 from pathlib import Path
 from datetime import datetime, time, timedelta
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 from telegram import (
     InlineKeyboardButton,
@@ -25,7 +26,10 @@ from telegram.ext import (
 )
 from config import TOKEN
 
-from scanner.autoscout import rechercher_voitures
+from scanner.autoscout import (
+    analyser_lien as analyser_lien_autoscout,
+    rechercher_voitures
+)
 
 from database.database import (
     activer_scanner_global,
@@ -55,8 +59,13 @@ from ai.marche import analyser_marche
 from business.business_score import (
     calculer_business_score,
     formater_business_score,
+    donnees_business,
+    identifiant_modele,
 )
-from scanner.deuxiememain import rechercher_voitures as rechercher_2ememain
+from scanner.deuxiememain import (
+    analyser_lien as analyser_lien_2ememain,
+    rechercher_voitures as rechercher_2ememain
+)
 
 
 SCORE_ALERTE_MINIMUM = 80
@@ -151,6 +160,7 @@ PHRASES_BUSINESS = [
 
 MENU_PRINCIPAL_ACTIONS = [
     [("🏠 Accueil", "menu:home")],
+    [("🔗 Analyser une annonce", "analysis:ask_link")],
     [("🔥 Scanner Business", "menu:scanner"), ("⭐ Opportunités", "menu:opportunities")],
     [("❤️ Favoris", "menu:favorites"), ("📊 Tableau de bord", "menu:dashboard")],
     [("⚙️ Paramètres", "menu:settings"), ("ℹ️ Aide", "menu:help")],
@@ -385,6 +395,182 @@ def formater_prix(prix):
         return f"{prix} €"
 
     return str(prix)
+
+
+def reconnaitre_plateforme_lien(lien):
+    try:
+        domaine = urlparse(lien).netloc.lower()
+    except ValueError:
+        return None
+
+    if "autoscout24" in domaine:
+        return "autoscout24"
+
+    if "2ememain" in domaine or "2dehands" in domaine:
+        return "2ememain"
+
+    return None
+
+
+def lien_valide(lien):
+    try:
+        resultat = urlparse(lien)
+    except ValueError:
+        return False
+
+    return resultat.scheme in {"http", "https"} and bool(resultat.netloc)
+
+
+def analyser_lien_plateforme(lien):
+    if not lien_valide(lien):
+        raise ValueError("Lien invalide.")
+
+    plateforme = reconnaitre_plateforme_lien(lien)
+
+    if plateforme == "autoscout24":
+        return analyser_lien_autoscout(lien)
+
+    if plateforme == "2ememain":
+        return analyser_lien_2ememain(lien)
+
+    raise ValueError("Plateforme inconnue. Utilise un lien AutoScout24 ou 2ememain.")
+
+
+def fiche_modele_business(voiture):
+    donnees = donnees_business()
+    modele_id = identifiant_modele(voiture, donnees)
+    fiche = donnees.get("modeles", {}).get("modeles", {}).get(modele_id)
+    return modele_id, fiche
+
+
+def valeur_sourcee(champ, defaut="Inconnu"):
+    if isinstance(champ, dict):
+        return champ.get("valeur", defaut)
+
+    if champ in (None, "", [], {}):
+        return defaut
+
+    return champ
+
+
+def formater_lez(fiche):
+    if not fiche:
+        return "Inconnu"
+
+    lez = fiche.get("lez", {})
+    norme = valeur_sourcee(lez.get("norme_euro_minimale_conseillee"))
+    risque = valeur_sourcee(lez.get("risque_lez_belgique"))
+    impact = valeur_sourcee(lez.get("impact_revente"))
+
+    return (
+        f"Norme conseillée : {norme}\n"
+        f"Risque Belgique : {risque}\n"
+        f"Impact revente : {impact}"
+    )
+
+
+def formater_problemes_connus(fiche):
+    if not fiche:
+        return "Inconnu"
+
+    pannes = fiche.get("mecanique", {}).get("pannes_frequentes", [])
+
+    if not pannes:
+        return "Inconnu"
+
+    lignes = []
+
+    for panne in pannes:
+        lignes.append(str(valeur_sourcee(panne)))
+
+    return "\n".join(f"- {ligne}" for ligne in lignes if ligne) or "Inconnu"
+
+
+def formater_donnees_manquantes(voiture):
+    champs = []
+
+    for cle, libelle in (
+        ("annee", "année"),
+        ("kilometrage", "kilométrage"),
+        ("prix", "prix"),
+        ("carburant", "carburant"),
+        ("boite", "boîte"),
+    ):
+        if voiture.get(cle) in (None, "", "Inconnu", "Inconnue"):
+            champs.append(libelle)
+
+    if not champs:
+        return "Aucune donnée critique manquante."
+
+    return "Données manquantes : " + ", ".join(champs) + "."
+
+
+def formater_analyse_lien(voiture, analyse, business_score, infos_vendeur, fiche):
+    infos_vendeur = infos_vendeur or {}
+    score_vendeur = infos_vendeur.get("score", "Inconnu")
+    verdict_vendeur = infos_vendeur.get("verdict", "aucun historique connu")
+    baisse_totale = infos_vendeur.get("baisse_totale", 0)
+    risques = analyse.get("risques") or []
+
+    if isinstance(risques, str):
+        risques = [risques] if risques else []
+
+    niveau_risque = "Faible" if not risques else ", ".join(map(str, risques))
+
+    return (
+        "🔎 ANALYSE DE L'ANNONCE\n\n"
+        f"🚗 {voiture.get('titre') or voiture.get('modele')}\n"
+        f"🌐 Source : {voiture.get('source', 'Inconnu')}\n\n"
+        f"💰 Prix affiché : {formater_prix(voiture.get('prix'))}\n"
+        f"📊 Prix marché estimé : {formater_prix(analyse['prix_marche'])}\n"
+        f"💵 Bénéfice brut estimé : +{formater_prix(analyse['benefice'])}\n"
+        f"🎯 Prix de négociation conseillé : {formater_prix(analyse['prix_conseille'])}\n"
+        f"⛔ Prix maximum à payer : {formater_prix(analyse['prix_max'])}\n\n"
+        f"⭐ Score IA : {analyse['score']}/100\n"
+        f"🔥 Business Score : {business_score['score']}/100\n"
+        f"{business_score['etoiles']} {business_score['verdict']}\n"
+        f"⚠️ Niveau de risque : {niveau_risque}\n\n"
+        f"📅 Année : {voiture.get('annee', 'Inconnu')}\n"
+        f"🛣️ Kilométrage : {extraire_kilometrage(voiture)}\n"
+        f"⛽ Carburant : {voiture.get('carburant', 'Inconnu')}\n"
+        f"⚙️ Boîte : {voiture.get('boite', 'Inconnue')}\n"
+        f"📍 Localisation : {voiture.get('localisation') or voiture.get('ville', 'Inconnu')}\n\n"
+        f"⏳ Vendeur pressé : {score_vendeur}/100 - {verdict_vendeur}\n"
+        f"📉 Baisse totale connue : {formater_prix(baisse_totale)}\n\n"
+        "🌍 Compatibilité LEZ\n"
+        f"{formater_lez(fiche)}\n\n"
+        "🧰 Problèmes connus\n"
+        f"{formater_problemes_connus(fiche)}\n\n"
+        f"📝 {formater_donnees_manquantes(voiture)}\n\n"
+        f"🔗 {voiture.get('lien')}"
+    )
+
+
+def analyser_annonce_par_lien(lien):
+    voiture = analyser_lien_plateforme(lien)
+
+    if voiture.get("prix") in (None, "", "Inconnu"):
+        analyse = analyser_annonce(voiture)
+    else:
+        analyse = analyser_annonce(voiture)
+
+    infos_vendeur = analyser_pression_vendeur(voiture["lien"])
+    business_score = calculer_business_score(
+        voiture,
+        analyse,
+        infos_vendeur,
+        PRIX_MAX_GLOBAL
+    )
+    modele_id, fiche = fiche_modele_business(voiture)
+    voiture["modele_id"] = modele_id
+
+    return formater_analyse_lien(
+        voiture,
+        analyse,
+        business_score,
+        infos_vendeur,
+        fiche
+    )
 
 
 def extraire_recherche_et_filtres(args):
@@ -1490,6 +1676,33 @@ async def business(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def analyser(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if len(context.args) == 0:
+        await update.message.reply_text(
+            "❌ Utilisation : /analyser <lien AutoScout24 ou 2ememain>"
+        )
+        return
+
+    lien = " ".join(context.args).strip()
+    await update.message.reply_text("🔎 Analyse de l'annonce en cours...")
+
+    try:
+        texte = analyser_annonce_par_lien(lien)
+    except ValueError as erreur:
+        texte = f"❌ {erreur}"
+    except RuntimeError as erreur:
+        texte = f"❌ Impossible de récupérer l'annonce.\n{erreur}"
+    except Exception as erreur:
+        logger.exception("Erreur pendant /analyser")
+        texte = (
+            "❌ Impossible d'analyser cette annonce. "
+            f"Détail : {erreur}"
+        )
+
+    for message in decouper_messages([texte], limite=3900):
+        await update.message.reply_text(message)
+
+
 async def historique(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) == 0:
         await update.message.reply_text(
@@ -1815,6 +2028,13 @@ async def interface_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await afficher_menu_callback(query, texte_parametres(), clavier_parametres())
     elif data == "menu:help":
         await afficher_menu_callback(query, texte_aide(), clavier_aide())
+    elif data == "analysis:ask_link":
+        context.user_data["attente_analyse_lien"] = True
+        await afficher_menu_callback(
+            query,
+            "🔗 Colle le lien AutoScout24 ou 2ememain à analyser.",
+            clavier_retour_accueil()
+        )
     elif data == "scanner:enable":
         texte = (
             "✅ Scanner Business global activé."
@@ -1885,6 +2105,27 @@ async def interface_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def gerer_reply_keyboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texte = (update.message.text or "").strip()
+
+    if context.user_data.get("attente_analyse_lien"):
+        context.user_data.pop("attente_analyse_lien", None)
+        await update.message.reply_text("🔎 Analyse de l'annonce en cours...")
+
+        try:
+            resultat = analyser_annonce_par_lien(texte)
+        except ValueError as erreur:
+            resultat = f"❌ {erreur}"
+        except RuntimeError as erreur:
+            resultat = f"❌ Impossible de récupérer l'annonce.\n{erreur}"
+        except Exception as erreur:
+            logger.exception("Erreur pendant l'analyse par bouton")
+            resultat = (
+                "❌ Impossible d'analyser cette annonce. "
+                f"Détail : {erreur}"
+            )
+
+        for message in decouper_messages([resultat], limite=3900):
+            await update.message.reply_text(message)
+        return
 
     if texte == "🏠 Accueil":
         await update.message.reply_text(texte_accueil(), reply_markup=clavier_principal())
@@ -1960,6 +2201,7 @@ def main():
     app.add_handler(CommandHandler("surveillances", surveillances))
     app.add_handler(CommandHandler("stop_surveillance", stop_surveillance))
     app.add_handler(CommandHandler("business", business))
+    app.add_handler(CommandHandler("analyser", analyser))
     app.add_handler(CommandHandler("historique", historique))
     app.add_handler(CommandHandler("scanner_global", scanner_global))
     app.add_handler(CommandHandler("stop_scanner_global", stop_scanner_global))
