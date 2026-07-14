@@ -91,6 +91,7 @@ from scanner.deuxiememain import (
     analyser_lien as analyser_lien_2ememain,
     rechercher_voitures as rechercher_2ememain
 )
+from scanner.aggregateur import rechercher_partout
 
 
 SCORE_ALERTE_MINIMUM = 80
@@ -232,6 +233,7 @@ def clavier_scanner_business():
             InlineKeyboardButton("📌 Statut", callback_data="scanner:status"),
             InlineKeyboardButton("🚀 Lancer un scan", callback_data="scanner:run"),
         ],
+        [InlineKeyboardButton("🌍 Scanner Europe", callback_data="scanner:europe")],
         [InlineKeyboardButton("⚙️ Paramètres", callback_data="scanner:settings")],
         [InlineKeyboardButton("🏠 Accueil", callback_data="menu:home")],
     ])
@@ -1630,6 +1632,113 @@ async def internet(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(message)
 
 
+def formater_repartition_plateformes(plateformes):
+    lignes = []
+
+    for nom, total in plateformes.items():
+        lignes.append(f"- {nom} : {total}")
+
+    return "\n".join(lignes) if lignes else "- Aucune plateforme"
+
+
+def formater_comparaison_europe(comparaison):
+    belgique = comparaison.get("belgique")
+    allemagne = comparaison.get("allemagne")
+    difference = comparaison.get("difference")
+
+    if belgique is None or allemagne is None or difference is None:
+        return "Comparaison Belgique / Allemagne : données insuffisantes"
+
+    return (
+        f"Belgique : {formater_prix(belgique)}\n"
+        f"Allemagne : {formater_prix(allemagne)}\n"
+        f"Différence : {formater_prix(difference)}"
+    )
+
+
+def formater_resultat_europe(resultat):
+    annonces = resultat["annonces"]
+    erreurs = resultat.get("erreurs") or {}
+    pays = ", ".join(resultat.get("pays") or ["Inconnu"])
+    blocs = [
+        "🌍 SCAN MULTI-PLATEFORMES",
+        "",
+        f"Recherche : {resultat['modele']}",
+        f"Total : {resultat['total']} annonces",
+        f"Total brut : {resultat['total_brut']}",
+        f"Doublons forts retirés : {resultat['doublons']}",
+        "",
+        "Répartition :",
+        formater_repartition_plateformes(resultat["plateformes"]),
+        "",
+        f"Pays détectés : {pays}",
+        "",
+        formater_comparaison_europe(resultat["comparaison"]),
+    ]
+
+    if erreurs:
+        blocs.extend([
+            "",
+            "⚠️ Plateformes en erreur :",
+            *[f"- {nom} : {erreur}" for nom, erreur in erreurs.items()],
+        ])
+
+    if not annonces:
+        blocs.extend(["", "Aucune annonce exploitable trouvée."])
+        return "\n".join(blocs)
+
+    top = []
+
+    for annonce in annonces:
+        try:
+            analyse = analyser_annonce(annonce)
+        except Exception:
+            analyse = {"score": 0, "benefice": 0}
+
+        top.append((annonce, analyse))
+
+    top = sorted(
+        top,
+        key=lambda item: (
+            item[1].get("score", 0),
+            item[1].get("benefice", 0)
+        ),
+        reverse=True
+    )[:5]
+
+    blocs.extend(["", "🔥 Top 5 opportunités :"])
+
+    for index, (annonce, analyse) in enumerate(top, start=1):
+        blocs.append(
+            "\n".join([
+                f"{index}. {annonce.get('titre') or annonce.get('modele')}",
+                f"🌐 {annonce.get('source')} - {annonce.get('pays', 'Inconnu')}",
+                f"💰 Prix : {formater_prix(annonce.get('prix'))}",
+                f"📅 Année : {annonce.get('annee', 'Inconnu')}",
+                f"🛣️ Km : {annonce.get('kilometrage', 'Inconnu')}",
+                f"⭐ Score : {analyse.get('score', 0)}/100",
+                f"💵 Bénéfice estimé : +{formater_prix(analyse.get('benefice'))}",
+                f"🔗 {annonce.get('lien')}",
+            ])
+        )
+
+    return "\n\n".join(blocs)
+
+
+async def europe(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if len(context.args) == 0:
+        await update.message.reply_text("❌ Utilisation : /europe Golf GTI")
+        return
+
+    modele = " ".join(context.args).strip()
+    await update.message.reply_text("🌍 Scan Europe en cours...")
+    resultat = rechercher_partout(modele)
+    texte = formater_resultat_europe(resultat)
+
+    for message in decouper_messages([texte], limite=3900):
+        await update.message.reply_text(message)
+
+
 async def surveille(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if len(context.args) == 0:
@@ -2524,6 +2633,13 @@ async def interface_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await afficher_menu_callback(query, texte, clavier_scanner_business())
     elif data == "scanner:status":
         await afficher_menu_callback(query, generer_statut_scanner_global(chat_id), clavier_scanner_business())
+    elif data == "scanner:europe":
+        context.user_data["attente_scan_europe"] = True
+        await afficher_menu_callback(
+            query,
+            "🌍 Envoie le modèle à scanner en Europe, par exemple : Golf GTI.",
+            clavier_scanner_business()
+        )
     elif data == "scanner:run":
         if scan_global_en_cours:
             await afficher_menu_callback(
@@ -2755,6 +2871,16 @@ async def gerer_reply_keyboard(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return
 
+    if context.user_data.get("attente_scan_europe"):
+        context.user_data.pop("attente_scan_europe", None)
+        await update.message.reply_text("🌍 Scan Europe en cours...")
+        resultat = rechercher_partout(texte)
+        reponse = formater_resultat_europe(resultat)
+
+        for message in decouper_messages([reponse], limite=3900):
+            await update.message.reply_text(message, reply_markup=clavier_scanner_business())
+        return
+
     if context.user_data.get("attente_analyse_lien"):
         context.user_data.pop("attente_analyse_lien", None)
         await update.message.reply_text("🔎 Analyse de l'annonce en cours...")
@@ -2864,6 +2990,7 @@ def main():
     app.add_handler(CommandHandler("sites", sites))
     app.add_handler(CommandHandler("recherche", recherche))
     app.add_handler(CommandHandler("internet", internet))
+    app.add_handler(CommandHandler("europe", europe))
     app.add_handler(CommandHandler("surveille", surveille))
     app.add_handler(CommandHandler("surveillances", surveillances))
     app.add_handler(CommandHandler("stop_surveillance", stop_surveillance))
