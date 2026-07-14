@@ -1,3 +1,4 @@
+import os
 import re
 from urllib.parse import quote_plus, urljoin
 
@@ -12,12 +13,26 @@ HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 Chrome/137.0 Safari/537.36"
-    )
+    ),
+    "Accept-Language": "fr-BE,fr;q=0.9,nl-BE;q=0.8,en;q=0.7",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Referer": f"{BASE_URL}/fr/",
 }
 
 
 def _construire_url(modele):
     return f"{BASE_URL}/fr/voitures/search?keyword={quote_plus(modele)}"
+
+
+def _session():
+    session = requests.Session()
+    session.headers.update(HEADERS)
+
+    cookie = os.getenv("GOCAR_COOKIE")
+    if cookie:
+        session.headers.update({"Cookie": cookie})
+
+    return session
 
 
 def _extraire_nombre(texte):
@@ -96,10 +111,16 @@ def rechercher_voitures(modele, limite=MAX_ANNONCES):
     url = _construire_url(modele)
 
     try:
-        reponse = requests.get(url, headers=HEADERS, timeout=15)
+        reponse = _session().get(url, timeout=15)
+
+        if reponse.status_code == 403:
+            raise RuntimeError("Gocar protégée: accès HTTP 403")
+
         reponse.raise_for_status()
     except requests.exceptions.Timeout as erreur:
         raise RuntimeError(f"Gocar timeout: {erreur}") from erreur
+    except RuntimeError:
+        raise
     except requests.exceptions.RequestException as erreur:
         raise RuntimeError(f"Gocar inaccessible: {erreur}") from erreur
 
