@@ -90,9 +90,14 @@ def identifiant_modele(voiture, donnees=None):
             normaliser_texte(alias): identifiant
             for alias, identifiant in contenu.get("alias", {}).items()
         })
-        modeles_connus.update(contenu.get("modeles", {}).keys())
+        modeles = contenu.get("modeles", {})
 
-        for identifiant, fiche in contenu.get("modeles", {}).items():
+        if not isinstance(modeles, dict):
+            continue
+
+        modeles_connus.update(modeles.keys())
+
+        for identifiant, fiche in modeles.items():
             if not isinstance(fiche, dict):
                 continue
 
@@ -133,6 +138,9 @@ def valeur_modele(nom_critere, identifiant, donnees):
         return None, True
 
     modeles = contenu.get("modeles", {})
+
+    if not isinstance(modeles, dict):
+        return None, True
 
     if identifiant in modeles:
         return modeles[identifiant], False

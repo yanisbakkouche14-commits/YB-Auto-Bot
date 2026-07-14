@@ -80,6 +80,7 @@ from business.business_score import (
     identifiant_modele,
 )
 from business.negociation import calculer_negociation
+from business.mecanique import analyser_mecanique
 from business.dashboard import (
     formater_dashboard,
     formater_sources,
@@ -442,6 +443,9 @@ def acquerir_verrou_instance(chemin_verrou=CHEMIN_VERROU_INSTANCE):
 
 
 def formater_prix(prix):
+    if prix in (None, "", "Inconnu"):
+        return "Inconnu"
+
     if isinstance(prix, int):
         return f"{prix} €"
 
@@ -576,6 +580,29 @@ def formater_negociation(negociation):
     )
 
 
+def formater_mecanique(mecanique):
+    pannes = mecanique.get("pannes_connues") or []
+    pannes_texte = "\n".join(f"- {panne}" for panne in pannes) or "- Inconnu"
+    score_fiabilite = mecanique.get("score_fiabilite")
+    score_mecanique = mecanique.get("score_mecanique")
+    cout_moyen = mecanique.get("cout_reparation_moyen")
+    marge_nette = mecanique.get("marge_nette_estimee")
+    risque = mecanique.get("risque") or "inconnu"
+    commentaire = mecanique.get("commentaire") or "Donnees mecaniques insuffisantes."
+
+    return (
+        "🔧 MÉCANIQUE\n\n"
+        f"Fiabilité : {score_fiabilite if score_fiabilite is not None else 'Inconnu'}/10\n"
+        f"Score mécanique : {score_mecanique}/10\n\n"
+        "Pannes connues :\n"
+        f"{pannes_texte}\n\n"
+        f"Coût moyen : {formater_prix(cout_moyen)}\n"
+        f"Marge nette estimée : {formater_prix(marge_nette)}\n\n"
+        f"Verdict : Risque {risque}.\n"
+        f"Commentaire : {commentaire}"
+    )
+
+
 def formater_analyse_lien(
     voiture,
     analyse,
@@ -583,6 +610,7 @@ def formater_analyse_lien(
     infos_vendeur,
     fiche,
     negociation,
+    mecanique,
 ):
     infos_vendeur = infos_vendeur or {}
     score_vendeur = infos_vendeur.get("score", "Inconnu")
@@ -609,6 +637,7 @@ def formater_analyse_lien(
         f"{business_score['etoiles']} {business_score['verdict']}\n"
         f"⚠️ Niveau de risque : {niveau_risque}\n\n"
         f"{formater_negociation(negociation)}\n\n"
+        f"{formater_mecanique(mecanique)}\n\n"
         f"📅 Année : {voiture.get('annee', 'Inconnu')}\n"
         f"🛣️ Kilométrage : {extraire_kilometrage(voiture)}\n"
         f"⛽ Carburant : {voiture.get('carburant', 'Inconnu')}\n"
@@ -648,6 +677,14 @@ def analyser_annonce_par_lien_detail(lien):
         infos_vendeur,
         infos_vendeur.get("score") if infos_vendeur else None
     )
+    mecanique = analyser_mecanique(
+        voiture.get("titre") or voiture.get("modele"),
+        generation=voiture.get("generation"),
+        moteur=voiture.get("moteur") or voiture.get("motorisation"),
+        boite=voiture.get("boite"),
+        annee=voiture.get("annee"),
+        benefice_estime=analyse.get("benefice"),
+    )
 
     texte = formater_analyse_lien(
         voiture,
@@ -656,6 +693,7 @@ def analyser_annonce_par_lien_detail(lien):
         infos_vendeur,
         fiche,
         negociation,
+        mecanique,
     )
 
     return {
@@ -666,6 +704,7 @@ def analyser_annonce_par_lien_detail(lien):
         "infos_vendeur": infos_vendeur,
         "fiche": fiche,
         "negociation": negociation,
+        "mecanique": mecanique,
     }
 
 
