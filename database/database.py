@@ -1,6 +1,6 @@
 import os
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 DATABASE_PATH = os.getenv("YB_AUTO_BOT_DB", "voitures.db")
@@ -104,6 +104,40 @@ CREATE TABLE IF NOT EXISTS statistiques_scans (
 )
 """)
 
+
+def _ajouter_colonne_table_si_absente(nom_table, nom_colonne, definition):
+    curseur.execute(f"PRAGMA table_info({nom_table})")
+    colonnes = {colonne[1] for colonne in curseur.fetchall()}
+
+    if nom_colonne not in colonnes:
+        curseur.execute(
+            f"ALTER TABLE {nom_table} ADD COLUMN {nom_colonne} {definition}"
+        )
+
+
+_ajouter_colonne_table_si_absente(
+    "statistiques_scans",
+    "type_scan",
+    "TEXT DEFAULT 'surveillance'"
+)
+_ajouter_colonne_table_si_absente("statistiques_scans", "lot", "TEXT")
+_ajouter_colonne_table_si_absente("statistiques_scans", "source", "TEXT")
+_ajouter_colonne_table_si_absente(
+    "statistiques_scans",
+    "alertes_envoyees",
+    "INTEGER NOT NULL DEFAULT 0"
+)
+_ajouter_colonne_table_si_absente(
+    "statistiques_scans",
+    "duree_secondes",
+    "REAL"
+)
+_ajouter_colonne_table_si_absente(
+    "statistiques_scans",
+    "meilleur_score_business",
+    "INTEGER"
+)
+
 curseur.execute("""
 CREATE TABLE IF NOT EXISTS historique_prix (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -170,6 +204,65 @@ CREATE TABLE IF NOT EXISTS alertes_baisse_favoris (
     UNIQUE(signature)
 )
 """)
+
+curseur.execute("""
+CREATE TABLE IF NOT EXISTS opportunites (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER,
+    lien TEXT NOT NULL,
+    modele TEXT,
+    source TEXT,
+    prix INTEGER,
+    benefice INTEGER,
+    score_business INTEGER,
+    score_negociation INTEGER,
+    score_vendeur_presse INTEGER,
+    baisse_prix INTEGER,
+    date_detection TEXT NOT NULL,
+    UNIQUE(chat_id, lien, date_detection)
+)
+""")
+
+curseur.execute(
+    "CREATE INDEX IF NOT EXISTS idx_statistiques_scans_date "
+    "ON statistiques_scans(date_scan)"
+)
+curseur.execute(
+    "CREATE INDEX IF NOT EXISTS idx_statistiques_scans_chat "
+    "ON statistiques_scans(chat_id)"
+)
+curseur.execute(
+    "CREATE INDEX IF NOT EXISTS idx_statistiques_scans_source "
+    "ON statistiques_scans(source)"
+)
+curseur.execute(
+    "CREATE INDEX IF NOT EXISTS idx_opportunites_chat_date "
+    "ON opportunites(chat_id, date_detection)"
+)
+curseur.execute(
+    "CREATE INDEX IF NOT EXISTS idx_opportunites_modele "
+    "ON opportunites(modele)"
+)
+curseur.execute(
+    "CREATE INDEX IF NOT EXISTS idx_opportunites_source "
+    "ON opportunites(source)"
+)
+curseur.execute(
+    "CREATE INDEX IF NOT EXISTS idx_opportunites_score_business "
+    "ON opportunites(score_business)"
+)
+curseur.execute(
+    "CREATE INDEX IF NOT EXISTS idx_opportunites_benefice "
+    "ON opportunites(benefice)"
+)
+curseur.execute(
+    "CREATE INDEX IF NOT EXISTS idx_favoris_chat_actif "
+    "ON favoris(chat_id, actif)"
+)
+curseur.execute(
+    "CREATE INDEX IF NOT EXISTS idx_historique_prix_lien "
+    "ON historique_prix(lien)"
+)
 
 connexion.commit()
 
@@ -842,30 +935,48 @@ def enregistrer_statistiques_scan(
     bonnes_affaires,
     meilleur_modele=None,
     meilleur_benefice=None,
-    date_scan=None
+    date_scan=None,
+    type_scan="surveillance",
+    lot=None,
+    source=None,
+    alertes_envoyees=0,
+    duree_secondes=None,
+    meilleur_score_business=None,
 ):
     curseur.execute(
         """
         INSERT INTO statistiques_scans (
             chat_id,
+            type_scan,
             recherche,
+            lot,
+            source,
             annonces_analysees,
             nouvelles_annonces,
             bonnes_affaires,
+            alertes_envoyees,
+            duree_secondes,
             meilleur_modele,
             meilleur_benefice,
+            meilleur_score_business,
             date_scan
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             chat_id,
+            type_scan,
             recherche,
+            lot,
+            source,
             annonces_analysees,
             nouvelles_annonces,
             bonnes_affaires,
+            alertes_envoyees,
+            duree_secondes,
             meilleur_modele,
             meilleur_benefice,
+            meilleur_score_business,
             date_scan or datetime.now().isoformat(timespec="seconds")
         )
     )
@@ -1379,3 +1490,367 @@ def nombre_alertes_baisse_favori(chat_id, lien):
         (chat_id, lien)
     )
     return curseur.fetchone()[0]
+
+
+def _periode_sql(jours=None):
+    if jours is None:
+        return None
+
+    return datetime.now().timestamp() - jours * 86400
+
+
+def _debut_jour_iso():
+    return datetime.now().replace(
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0
+    ).isoformat(timespec="seconds")
+
+
+def _debut_periode_iso(jours=None):
+    if jours is None:
+        return None
+
+    return (
+        datetime.now()
+        .replace(hour=0, minute=0, second=0, microsecond=0)
+        - timedelta(days=jours - 1)
+    ).isoformat(timespec="seconds")
+
+
+def enregistrer_opportunite(
+    chat_id,
+    lien,
+    modele=None,
+    source=None,
+    prix=None,
+    benefice=None,
+    score_business=None,
+    score_negociation=None,
+    score_vendeur_presse=None,
+    baisse_prix=None,
+    date_detection=None,
+):
+    try:
+        curseur.execute(
+            """
+            INSERT OR IGNORE INTO opportunites (
+                chat_id,
+                lien,
+                modele,
+                source,
+                prix,
+                benefice,
+                score_business,
+                score_negociation,
+                score_vendeur_presse,
+                baisse_prix,
+                date_detection
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                chat_id,
+                lien,
+                modele,
+                source,
+                _prix_numerique(prix),
+                _prix_numerique(benefice),
+                score_business,
+                score_negociation,
+                score_vendeur_presse,
+                _prix_numerique(baisse_prix) or 0,
+                date_detection or _date_iso_maintenant(),
+            )
+        )
+        connexion.commit()
+        return curseur.rowcount > 0
+    except sqlite3.IntegrityError:
+        return False
+
+
+def compter_favoris_actifs(chat_id):
+    curseur.execute(
+        """
+        SELECT COUNT(*)
+        FROM favoris
+        WHERE chat_id = ? AND actif = 1
+        """,
+        (chat_id,)
+    )
+    return curseur.fetchone()[0]
+
+
+def compter_surveillances_actives(chat_id):
+    curseur.execute(
+        """
+        SELECT COUNT(*)
+        FROM surveillances
+        WHERE chat_id = ?
+        """,
+        (chat_id,)
+    )
+    return curseur.fetchone()[0]
+
+
+def compter_alertes_favoris_depuis(chat_id, date_debut):
+    curseur.execute(
+        """
+        SELECT COUNT(*)
+        FROM alertes_baisse_favoris
+        WHERE chat_id = ?
+        AND date_alerte >= ?
+        """,
+        (chat_id, date_debut)
+    )
+    return curseur.fetchone()[0]
+
+
+def dashboard_resume(chat_id):
+    debut_jour = _debut_jour_iso()
+
+    curseur.execute(
+        """
+        SELECT
+            COALESCE(SUM(annonces_analysees), 0),
+            COALESCE(SUM(nouvelles_annonces), 0),
+            COALESCE(SUM(bonnes_affaires), 0),
+            COALESCE(SUM(alertes_envoyees), 0),
+            MAX(date_scan)
+        FROM statistiques_scans
+        WHERE chat_id = ?
+        """,
+        (chat_id,)
+    )
+    total, _nouvelles_total, _bonnes_total, _alertes_total, dernier_scan = (
+        curseur.fetchone()
+    )
+
+    curseur.execute(
+        """
+        SELECT
+            COALESCE(SUM(nouvelles_annonces), 0),
+            COALESCE(SUM(bonnes_affaires), 0),
+            COALESCE(SUM(alertes_envoyees), 0)
+        FROM statistiques_scans
+        WHERE chat_id = ?
+        AND date_scan >= ?
+        """,
+        (chat_id, debut_jour)
+    )
+    nouvelles_jour, bonnes_jour, alertes_jour = curseur.fetchone()
+    alertes_jour += compter_alertes_favoris_depuis(chat_id, debut_jour)
+
+    curseur.execute(
+        """
+        SELECT
+            COALESCE(SUM(benefice), 0),
+            AVG(score_business)
+        FROM opportunites
+        WHERE chat_id = ?
+        AND date_detection >= ?
+        """,
+        (chat_id, debut_jour)
+    )
+    marge_jour, score_moyen = curseur.fetchone()
+
+    curseur.execute(
+        """
+        SELECT modele, benefice, score_business, lien
+        FROM opportunites
+        WHERE chat_id = ?
+        ORDER BY score_business DESC, benefice DESC
+        LIMIT 1
+        """,
+        (chat_id,)
+    )
+    meilleure = curseur.fetchone()
+    statut = statut_scanner_global(chat_id)
+
+    return {
+        "annonces_total": total,
+        "nouvelles_aujourdhui": nouvelles_jour,
+        "bonnes_affaires_aujourdhui": bonnes_jour,
+        "alertes_aujourdhui": alertes_jour,
+        "favoris_actifs": compter_favoris_actifs(chat_id),
+        "surveillances_actives": compter_surveillances_actives(chat_id),
+        "scanner_global_actif": bool(statut and statut["actif"]),
+        "dernier_scan": dernier_scan,
+        "marge_potentielle_jour": marge_jour,
+        "business_score_moyen_jour": round(score_moyen, 1) if score_moyen else 0,
+        "meilleure_opportunite": {
+            "modele": meilleure[0],
+            "benefice": meilleure[1],
+            "score_business": meilleure[2],
+            "lien": meilleure[3],
+        } if meilleure else None,
+    }
+
+
+def top_opportunites(chat_id, jours=None, limite=10, tri="score_business"):
+    date_debut = _debut_periode_iso(jours)
+    clauses = ["chat_id = ?"]
+    params = [chat_id]
+
+    if date_debut:
+        clauses.append("date_detection >= ?")
+        params.append(date_debut)
+
+    tris = {
+        "benefice": "benefice DESC, score_business DESC",
+        "score_business": "score_business DESC, benefice DESC",
+        "vendeur": "score_vendeur_presse DESC, score_business DESC",
+        "baisse": "baisse_prix DESC, score_business DESC",
+        "roi": (
+            "CASE WHEN prix > 0 THEN CAST(benefice AS REAL) / prix "
+            "ELSE 0 END DESC, score_business DESC"
+        ),
+    }
+    ordre = tris.get(tri, tris["score_business"])
+    params.append(limite)
+    curseur.execute(
+        f"""
+        SELECT *
+        FROM opportunites
+        WHERE {' AND '.join(clauses)}
+        ORDER BY {ordre}
+        LIMIT ?
+        """,
+        params
+    )
+    colonnes = [description[0] for description in curseur.description]
+    return [dict(zip(colonnes, ligne)) for ligne in curseur.fetchall()]
+
+
+def stats_modele(chat_id, modele, jours=None):
+    date_debut = _debut_periode_iso(jours)
+    clauses = ["chat_id = ?", "LOWER(modele) LIKE ?"]
+    params = [chat_id, f"%{modele.lower()}%"]
+
+    if date_debut:
+        clauses.append("date_detection >= ?")
+        params.append(date_debut)
+
+    curseur.execute(
+        f"""
+        SELECT prix, benefice, score_business, baisse_prix,
+               modele, lien, date_detection
+        FROM opportunites
+        WHERE {' AND '.join(clauses)}
+        ORDER BY date_detection ASC
+        """,
+        params
+    )
+    lignes = curseur.fetchall()
+
+    if not lignes:
+        return {
+            "modele": modele,
+            "nombre": 0,
+            "prix_moyen": 0,
+            "prix_median": 0,
+            "prix_min": 0,
+            "prix_max": 0,
+            "benefice_moyen": 0,
+            "score_business_moyen": 0,
+            "bonnes_affaires": 0,
+            "nombre_baisses": 0,
+            "meilleure_annonce": None,
+            "periode_debut": None,
+            "periode_fin": None,
+        }
+
+    prix = sorted(ligne[0] for ligne in lignes if ligne[0] is not None)
+    benefices = [ligne[1] for ligne in lignes if ligne[1] is not None]
+    scores = [ligne[2] for ligne in lignes if ligne[2] is not None]
+    baisses = [ligne[3] for ligne in lignes if ligne[3] and ligne[3] > 0]
+    milieu = len(prix) // 2
+    mediane = (
+        prix[milieu]
+        if len(prix) % 2
+        else round((prix[milieu - 1] + prix[milieu]) / 2)
+    ) if prix else 0
+    meilleure = max(
+        lignes,
+        key=lambda ligne: ((ligne[2] or 0), (ligne[1] or 0))
+    )
+
+    return {
+        "modele": modele,
+        "nombre": len(lignes),
+        "prix_moyen": round(sum(prix) / len(prix)) if prix else 0,
+        "prix_median": mediane,
+        "prix_min": min(prix) if prix else 0,
+        "prix_max": max(prix) if prix else 0,
+        "benefice_moyen": round(sum(benefices) / len(benefices)) if benefices else 0,
+        "score_business_moyen": round(sum(scores) / len(scores), 1) if scores else 0,
+        "bonnes_affaires": len([s for s in scores if s >= 80]),
+        "nombre_baisses": len(baisses),
+        "meilleure_annonce": {
+            "modele": meilleure[4],
+            "lien": meilleure[5],
+            "score_business": meilleure[2],
+            "benefice": meilleure[1],
+        },
+        "periode_debut": lignes[0][6],
+        "periode_fin": lignes[-1][6],
+    }
+
+
+def stats_sources():
+    curseur.execute(
+        """
+        SELECT
+            source,
+            COALESCE(SUM(annonces_analysees), 0),
+            COALESCE(SUM(nouvelles_annonces), 0),
+            COALESCE(SUM(bonnes_affaires), 0),
+            AVG(duree_secondes),
+            MAX(CASE WHEN annonces_analysees > 0 THEN date_scan END),
+            MAX(CASE WHEN annonces_analysees = 0 THEN date_scan END),
+            SUM(CASE WHEN annonces_analysees = 0 THEN 1 ELSE 0 END)
+        FROM statistiques_scans
+        WHERE source IS NOT NULL
+        GROUP BY source
+        ORDER BY source
+        """
+    )
+    return [
+        {
+            "source": ligne[0],
+            "annonces_recuperees": ligne[1],
+            "annonces_pertinentes": ligne[2],
+            "bonnes_affaires": ligne[3],
+            "erreurs": ligne[7],
+            "temps_moyen": round(ligne[4], 2) if ligne[4] is not None else None,
+            "derniere_reussite": ligne[5],
+            "dernier_echec": ligne[6],
+        }
+        for ligne in curseur.fetchall()
+    ]
+
+
+def series_dashboard(chat_id, jours=30):
+    date_debut = _debut_periode_iso(jours)
+    curseur.execute(
+        """
+        SELECT substr(date_detection, 1, 10), COUNT(*),
+               COALESCE(SUM(benefice), 0), AVG(score_business)
+        FROM opportunites
+        WHERE chat_id = ?
+        AND date_detection >= ?
+        GROUP BY substr(date_detection, 1, 10)
+        ORDER BY substr(date_detection, 1, 10)
+        """,
+        (chat_id, date_debut)
+    )
+    return [
+        {
+            "date": ligne[0],
+            "opportunites": ligne[1],
+            "marge": ligne[2],
+            "score_business_moyen": round(ligne[3], 1) if ligne[3] else 0,
+        }
+        for ligne in curseur.fetchall()
+    ]

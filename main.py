@@ -40,9 +40,11 @@ from database.database import (
     analyser_pression_vendeur,
     avancer_lot_scanner_global,
     bilan_business,
+    dashboard_resume,
     desactiver_scanner_global,
     enregistrer_alerte_baisse_favori,
     enregistrer_message_business,
+    enregistrer_opportunite,
     enregistrer_opportunite_globale_envoyee,
     enregistrer_statistiques_scan,
     formater_filtres,
@@ -61,9 +63,12 @@ from database.database import (
     signature_opportunite_globale,
     signature_alerte_baisse_favori,
     statut_scanner_global,
+    stats_modele,
+    stats_sources,
     supprimer_favori,
     supprimer_favori_par_id,
-    supprimer_surveillance
+    supprimer_surveillance,
+    top_opportunites
 )
 
 from ai.analyse import analyser_annonce
@@ -75,6 +80,12 @@ from business.business_score import (
     identifiant_modele,
 )
 from business.negociation import calculer_negociation
+from business.dashboard import (
+    formater_dashboard,
+    formater_sources,
+    formater_stats_modele,
+    formater_top,
+)
 from scanner.deuxiememain import (
     analyser_lien as analyser_lien_2ememain,
     rechercher_voitures as rechercher_2ememain
@@ -228,9 +239,11 @@ def clavier_scanner_business():
 def clavier_opportunites():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🏆 Top 10 aujourd'hui", callback_data="opp:top_today")],
+        [InlineKeyboardButton("🔥 Top de la semaine", callback_data="opp:top_week")],
         [InlineKeyboardButton("🚨 Dernières alertes", callback_data="opp:last_alerts")],
         [InlineKeyboardButton("⏳ Vendeurs pressés", callback_data="opp:urgent_sellers")],
         [InlineKeyboardButton("📉 Baisses de prix", callback_data="opp:price_drops")],
+        [InlineKeyboardButton("📈 Top ROI", callback_data="opp:top_roi")],
         [InlineKeyboardButton("🏠 Accueil", callback_data="menu:home")],
     ])
 
@@ -263,7 +276,12 @@ def clavier_analyse_annonce(est_favori=False):
 
 def clavier_tableau_de_bord():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📊 Actualiser", callback_data="dash:summary")],
+        [InlineKeyboardButton("📊 Vue générale", callback_data="dash:overview")],
+        [InlineKeyboardButton("🔥 Top du jour", callback_data="dash:top_today")],
+        [InlineKeyboardButton("📅 Top de la semaine", callback_data="dash:top_week")],
+        [InlineKeyboardButton("🚗 Stats par modèle", callback_data="dash:stats_model_prompt")],
+        [InlineKeyboardButton("📡 État des sources", callback_data="dash:sources")],
+        [InlineKeyboardButton("❤️ Favoris", callback_data="menu:favorites")],
         [InlineKeyboardButton("🏠 Accueil", callback_data="menu:home")],
     ])
 
@@ -1099,6 +1117,12 @@ def analyser_scan_global(voitures, prix_max):
             infos_vendeur,
             prix_max
         )
+        negociation = calculer_negociation(
+            voiture_score,
+            analyse,
+            infos_vendeur,
+            infos_vendeur.get("score") if infos_vendeur else None
+        )
 
         opportunites.append({
             "voiture": voiture,
@@ -1107,6 +1131,7 @@ def analyser_scan_global(voitures, prix_max):
             "prix": prix,
             "score_business": business_score["score"],
             "business_score": business_score,
+            "negociation": negociation,
             "est_nouvelle": est_nouvelle,
         })
 
@@ -1123,6 +1148,27 @@ def analyser_scan_global(voitures, prix_max):
             if item["infos_vendeur"] else 0,
         ),
         reverse=True
+    )
+
+
+def enregistrer_opportunite_depuis_resultat(chat_id, voiture, analyse, infos_vendeur, business_score, negociation):
+    if chat_id is None:
+        return False
+
+    baisse = infos_vendeur.get("baisse_totale", 0) if infos_vendeur else 0
+    score_vendeur = infos_vendeur.get("score") if infos_vendeur else None
+
+    return enregistrer_opportunite(
+        chat_id=chat_id,
+        lien=voiture.get("lien"),
+        modele=voiture.get("titre") or voiture.get("modele"),
+        source=voiture.get("source"),
+        prix=voiture.get("prix"),
+        benefice=analyse.get("benefice"),
+        score_business=business_score.get("score"),
+        score_negociation=negociation.get("score_negociation"),
+        score_vendeur_presse=score_vendeur,
+        baisse_prix=baisse,
     )
 
 
@@ -1201,7 +1247,7 @@ def formater_resume_scanner_global(nom_lot, opportunites, erreurs):
     return "".join(blocs)
 
 
-def analyser_et_enregistrer(voitures, filtres=None):
+def analyser_et_enregistrer(voitures, filtres=None, chat_id=None):
     annonces_analysees = []
     alertes = []
     nouvelles_annonces = 0
@@ -1233,11 +1279,25 @@ def analyser_et_enregistrer(voitures, filtres=None):
         )
 
         infos_vendeur = analyser_pression_vendeur(voiture["lien"])
+        business_score = calculer_business_score(
+            voiture,
+            analyse,
+            infos_vendeur,
+            PRIX_MAX_GLOBAL
+        )
+        negociation = calculer_negociation(
+            voiture,
+            analyse,
+            infos_vendeur,
+            infos_vendeur.get("score") if infos_vendeur else None
+        )
 
         if est_nouvelle and respecte_filtres(voiture, analyse, filtres):
             alertes.append({
                 "voiture": voiture,
                 "analyse": analyse,
+                "business_score": business_score,
+                "negociation": negociation,
                 "kilometrage": kilometrage,
                 "texte": (
                     formater_alerte(voiture, analyse, kilometrage)
@@ -1255,6 +1315,16 @@ def analyser_et_enregistrer(voitures, filtres=None):
                 "kilometrage": kilometrage,
                 "texte": formater_alerte_prix(infos_vendeur)
             })
+
+        if respecte_filtres(voiture, analyse, filtres):
+            enregistrer_opportunite_depuis_resultat(
+                chat_id,
+                voiture,
+                analyse,
+                infos_vendeur,
+                business_score,
+                negociation,
+            )
 
         bloc = (
 
@@ -1296,6 +1366,8 @@ def analyser_et_enregistrer(voitures, filtres=None):
         annonces_analysees.append({
             "voiture": voiture,
             "analyse": analyse,
+            "business_score": business_score,
+            "negociation": negociation,
             "bloc": bloc
         })
 
@@ -1445,7 +1517,10 @@ async def internet(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     marche = analyser_marche(voitures)
 
-    resultat = analyser_et_enregistrer(voitures)
+    resultat = analyser_et_enregistrer(
+        voitures,
+        chat_id=update.effective_chat.id
+    )
     annonces_analysees = resultat["annonces"]
     alertes = resultat["alertes"]
     nouvelles_annonces = resultat["nouvelles"]
@@ -1601,7 +1676,7 @@ async def scan_surveillances(context: ContextTypes.DEFAULT_TYPE):
                     )
                 continue
 
-            resultat = analyser_et_enregistrer(voitures)
+            resultat = analyser_et_enregistrer(voitures, chat_id=chat_id)
             alertes = resultat["alertes"][:MAX_ALERTES_PAR_RECHERCHE]
 
             for alerte in alertes:
@@ -1717,7 +1792,7 @@ async def scan_surveillances(context: ContextTypes.DEFAULT_TYPE):
                     )
                 continue
 
-            resultat = analyser_et_enregistrer(voitures, filtres)
+            resultat = analyser_et_enregistrer(voitures, filtres, chat_id)
             toutes_les_alertes = resultat["alertes"]
             meilleure_alerte = toutes_les_alertes[0] if toutes_les_alertes else None
 
@@ -1727,12 +1802,20 @@ async def scan_surveillances(context: ContextTypes.DEFAULT_TYPE):
                 annonces_analysees=len(voitures),
                 nouvelles_annonces=resultat["nouvelles"],
                 bonnes_affaires=len(toutes_les_alertes),
+                alertes_envoyees=min(
+                    len(toutes_les_alertes),
+                    MAX_ALERTES_PAR_RECHERCHE
+                ),
                 meilleur_modele=(
                     meilleure_alerte["voiture"]["modele"]
                     if meilleure_alerte else None
                 ),
                 meilleur_benefice=(
                     meilleure_alerte["analyse"]["benefice"]
+                    if meilleure_alerte else None
+                ),
+                meilleur_score_business=(
+                    meilleure_alerte.get("business_score", {}).get("score")
                     if meilleure_alerte else None
                 ),
                 date_scan=datetime.now(FUSEAU_HORAIRE).isoformat(
@@ -1756,6 +1839,40 @@ async def business(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         generer_message_business(update.effective_chat.id)
     )
+
+
+async def dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        generer_tableau_de_bord(update.effective_chat.id),
+        reply_markup=clavier_tableau_de_bord()
+    )
+
+
+async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    texte = generer_top(
+        update.effective_chat.id,
+        jours=1,
+        limite=5,
+        tri="score_business",
+        titre="🔥 Top 5 opportunités du jour"
+    )
+
+    for message in decouper_messages([texte], limite=3900):
+        await update.message.reply_text(message, reply_markup=clavier_opportunites())
+
+
+async def stats_modele_commande(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if len(context.args) == 0:
+        await update.message.reply_text(
+            "❌ Utilisation : /stats_modele <modèle>"
+        )
+        return
+
+    modele = " ".join(context.args).strip()
+    texte = formater_stats_modele(
+        stats_modele(update.effective_chat.id, modele)
+    )
+    await update.message.reply_text(texte, reply_markup=clavier_tableau_de_bord())
 
 
 async def analyser(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2138,6 +2255,14 @@ async def scan_global_business(context: ContextTypes.DEFAULT_TYPE):
                         infos_vendeur["baisse_totale"]
                         if infos_vendeur else 0
                     )
+                    enregistrer_opportunite_depuis_resultat(
+                        chat_id,
+                        opportunite["voiture"],
+                        opportunite["analyse"],
+                        infos_vendeur,
+                        opportunite["business_score"],
+                        opportunite["negociation"],
+                    )
                     enregistrer_opportunite_globale_envoyee(
                         chat_id,
                         opportunite["voiture"]["lien"],
@@ -2202,6 +2327,14 @@ async def executer_scan_global_pour_scanners(context, scanners_actifs):
                     baisse_totale = (
                         infos_vendeur["baisse_totale"]
                         if infos_vendeur else 0
+                    )
+                    enregistrer_opportunite_depuis_resultat(
+                        chat_id,
+                        opportunite["voiture"],
+                        opportunite["analyse"],
+                        infos_vendeur,
+                        opportunite["business_score"],
+                        opportunite["negociation"],
                     )
                     enregistrer_opportunite_globale_envoyee(
                         chat_id,
@@ -2296,17 +2429,17 @@ def generer_statut_scanner_global(chat_id):
 
 
 def generer_tableau_de_bord(chat_id):
-    statut = statut_scanner_global(chat_id)
-    actif = "oui" if statut and statut["actif"] else "non"
+    return formater_dashboard(dashboard_resume(chat_id))
 
-    return (
-        "📊 Tableau de bord\n\n"
-        "Opportunités trouvées : voir alertes reçues\n"
-        "Marge totale estimée : calcul détaillé à venir\n"
-        "Nombre d'annonces analysées : suivi actif via scans\n"
-        "Dernier scan : consulte les derniers messages d'alerte\n"
-        f"Scanner global actif : {actif}"
+
+def generer_top(chat_id, jours=1, limite=5, tri="score_business", titre=None):
+    opportunites = top_opportunites(
+        chat_id,
+        jours=jours,
+        limite=limite,
+        tri=tri
     )
+    return formater_top(titre or "🔥 Top opportunités", opportunites, limite)
 
 
 async def interface_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2380,14 +2513,66 @@ async def interface_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             )
     elif data == "scanner:settings":
         await afficher_menu_callback(query, texte_parametres(), clavier_scanner_business())
+    elif data == "opp:top_week":
+        await afficher_menu_callback(
+            query,
+            generer_top(chat_id, jours=7, limite=10, tri="score_business", titre="Top 10 cette semaine"),
+            clavier_opportunites()
+        )
+    elif data == "opp:top_roi":
+        await afficher_menu_callback(
+            query,
+            generer_top(chat_id, jours=30, limite=10, tri="roi", titre="Top ROI"),
+            clavier_opportunites()
+        )
     elif data == "opp:top_today":
-        await afficher_menu_callback(query, "🏆 Top 10 aujourd'hui\n\nLes meilleures opportunités seront affichées ici à partir des alertes reçues.", clavier_opportunites())
+        await afficher_menu_callback(
+            query,
+            generer_top(
+                chat_id,
+                jours=1,
+                limite=10,
+                tri="score_business",
+                titre="🏆 Top 10 aujourd'hui"
+            ),
+            clavier_opportunites()
+        )
     elif data == "opp:last_alerts":
-        await afficher_menu_callback(query, "🚨 Dernières alertes\n\nLes alertes sont envoyées automatiquement dans cette conversation.", clavier_opportunites())
+        await afficher_menu_callback(
+            query,
+            generer_top(
+                chat_id,
+                jours=7,
+                limite=10,
+                tri="score_business",
+                titre="🚨 Dernières alertes"
+            ),
+            clavier_opportunites()
+        )
     elif data == "opp:urgent_sellers":
-        await afficher_menu_callback(query, "⏳ Vendeurs pressés\n\nLe score vendeur pressé apparaît dans les alertes et dans /historique.", clavier_opportunites())
+        await afficher_menu_callback(
+            query,
+            generer_top(
+                chat_id,
+                jours=30,
+                limite=10,
+                tri="vendeur",
+                titre="⏳ Top vendeurs pressés"
+            ),
+            clavier_opportunites()
+        )
     elif data == "opp:price_drops":
-        await afficher_menu_callback(query, "📉 Baisses de prix\n\nLes baisses importantes déclenchent une nouvelle alerte.", clavier_opportunites())
+        await afficher_menu_callback(
+            query,
+            generer_top(
+                chat_id,
+                jours=30,
+                limite=10,
+                tri="baisse",
+                titre="📉 Top baisses de prix"
+            ),
+            clavier_opportunites()
+        )
     elif data == "fav:list":
         await afficher_menu_callback(
             query,
@@ -2470,8 +2655,45 @@ async def interface_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 chat_id=chat_id,
                 text="Aucune baisse de prix détectée sur tes favoris."
             )
-    elif data == "dash:summary":
+    elif data in ("dash:summary", "dash:overview"):
         await afficher_menu_callback(query, generer_tableau_de_bord(chat_id), clavier_tableau_de_bord())
+    elif data == "dash:top_today":
+        await afficher_menu_callback(
+            query,
+            generer_top(
+                chat_id,
+                jours=1,
+                limite=5,
+                tri="score_business",
+                titre="🔥 Top 5 du jour"
+            ),
+            clavier_tableau_de_bord()
+        )
+    elif data == "dash:top_week":
+        await afficher_menu_callback(
+            query,
+            generer_top(
+                chat_id,
+                jours=7,
+                limite=10,
+                tri="score_business",
+                titre="📅 Top 10 de la semaine"
+            ),
+            clavier_tableau_de_bord()
+        )
+    elif data == "dash:stats_model_prompt":
+        context.user_data["attente_stats_modele"] = True
+        await afficher_menu_callback(
+            query,
+            "🚗 Stats par modèle\n\nEnvoie le modèle à analyser, par exemple : golf, audi a3 ou bmw serie 1.",
+            clavier_tableau_de_bord()
+        )
+    elif data == "dash:sources":
+        await afficher_menu_callback(
+            query,
+            formater_sources(stats_sources()),
+            clavier_tableau_de_bord()
+        )
     elif data.startswith("settings:"):
         await afficher_menu_callback(query, "⚙️ Paramètres\n\nLes réglages personnalisés par bouton seront ajoutés à la prochaine étape.", clavier_parametres())
     elif data == "help:scores":
@@ -2484,6 +2706,15 @@ async def interface_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def gerer_reply_keyboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texte = (update.message.text or "").strip()
+
+    if context.user_data.get("attente_stats_modele"):
+        context.user_data.pop("attente_stats_modele", None)
+        stats = stats_modele(update.effective_chat.id, texte)
+        await update.message.reply_text(
+            formater_stats_modele(stats),
+            reply_markup=clavier_tableau_de_bord()
+        )
+        return
 
     if context.user_data.get("attente_analyse_lien"):
         context.user_data.pop("attente_analyse_lien", None)
@@ -2598,6 +2829,9 @@ def main():
     app.add_handler(CommandHandler("surveillances", surveillances))
     app.add_handler(CommandHandler("stop_surveillance", stop_surveillance))
     app.add_handler(CommandHandler("business", business))
+    app.add_handler(CommandHandler("dashboard", dashboard))
+    app.add_handler(CommandHandler("top", top))
+    app.add_handler(CommandHandler("stats_modele", stats_modele_commande))
     app.add_handler(CommandHandler("analyser", analyser))
     app.add_handler(CommandHandler("historique", historique))
     app.add_handler(CommandHandler("scanner_global", scanner_global))
