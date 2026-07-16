@@ -125,6 +125,10 @@ def _diagnostic_page(page, etape, nombre_cartes=None):
         "login_detecte": False,
         "checkpoint_detecte": False,
         "captcha_detecte": False,
+        "checkpoint_mot_html": False,
+        "captcha_mot_html": False,
+        "checkpoint_blocage_visible": False,
+        "captcha_blocage_visible": False,
         "marketplace_detecte": False,
         "nombre_cartes_marketplace": nombre_cartes,
     }
@@ -149,22 +153,24 @@ def _diagnostic_page(page, etape, nombre_cartes=None):
     except Exception:
         texte = ""
 
-    contenu = " ".join([
-        str(diagnostic["url_finale"]).lower(),
-        str(diagnostic["titre_page"]).lower(),
+    url = str(diagnostic["url_finale"]).lower()
+    titre = str(diagnostic["titre_page"]).lower()
+    contenu_visible = " ".join([url, titre, texte])
+
+    diagnostic["login_detecte"] = (
+        "login" in url
+        or "connectez-vous" in contenu_visible
+        or "se connecter" in contenu_visible
+        or "log in to facebook" in contenu_visible
+    )
+    diagnostic["checkpoint_mot_html"] = "checkpoint" in html
+    diagnostic["captcha_mot_html"] = "captcha" in html
+    diagnostic["marketplace_detecte"] = "marketplace" in " ".join([
+        url,
+        titre,
         html,
         texte,
     ])
-
-    diagnostic["login_detecte"] = (
-        "login" in str(diagnostic["url_finale"]).lower()
-        or "connectez-vous" in contenu
-        or "se connecter" in contenu
-        or "log in to facebook" in contenu
-    )
-    diagnostic["checkpoint_detecte"] = "checkpoint" in contenu
-    diagnostic["captcha_detecte"] = "captcha" in contenu
-    diagnostic["marketplace_detecte"] = "marketplace" in contenu
 
     if nombre_cartes is None:
         try:
@@ -174,19 +180,108 @@ def _diagnostic_page(page, etape, nombre_cartes=None):
         except Exception:
             diagnostic["nombre_cartes_marketplace"] = None
 
+    diagnostic["checkpoint_blocage_visible"] = _checkpoint_visible(
+        page,
+        url,
+        titre,
+        texte
+    )
+    diagnostic["captcha_blocage_visible"] = _captcha_visible(
+        page,
+        titre,
+        texte
+    )
+    diagnostic["checkpoint_detecte"] = diagnostic["checkpoint_blocage_visible"]
+    diagnostic["captcha_detecte"] = diagnostic["captcha_blocage_visible"]
+
+    if (
+        diagnostic["marketplace_detecte"]
+        and (diagnostic["nombre_cartes_marketplace"] or 0) > 0
+    ):
+        diagnostic["checkpoint_detecte"] = diagnostic["checkpoint_blocage_visible"]
+        diagnostic["captcha_detecte"] = diagnostic["captcha_blocage_visible"]
+
     logger.info(
         "Marketplace local diagnostic: etape=%s url_finale=%s titre_page=%r "
-        "login=%s checkpoint=%s captcha=%s marketplace=%s cartes=%s",
+        "login=%s checkpoint_html=%s checkpoint_visible=%s "
+        "captcha_html=%s captcha_visible=%s marketplace=%s cartes=%s",
         diagnostic["etape"],
         diagnostic["url_finale"],
         diagnostic["titre_page"],
         diagnostic["login_detecte"],
-        diagnostic["checkpoint_detecte"],
-        diagnostic["captcha_detecte"],
+        diagnostic["checkpoint_mot_html"],
+        diagnostic["checkpoint_blocage_visible"],
+        diagnostic["captcha_mot_html"],
+        diagnostic["captcha_blocage_visible"],
         diagnostic["marketplace_detecte"],
         diagnostic["nombre_cartes_marketplace"],
     )
     return diagnostic
+
+
+def _element_visible(page, selecteurs):
+    for selecteur in selecteurs:
+        try:
+            elements = page.locator(selecteur)
+            limite = min(elements.count(), 5)
+
+            for index in range(limite):
+                try:
+                    if elements.nth(index).is_visible(timeout=300):
+                        return True
+                except Exception:
+                    continue
+        except Exception:
+            continue
+
+    return False
+
+
+def _checkpoint_visible(page, url, titre, texte):
+    if "/checkpoint/" in url:
+        return True
+
+    contenu = " ".join([titre, texte])
+    expressions = (
+        "checkpoint",
+        "security check",
+        "vérification de sécurité",
+        "verification de securite",
+        "confirmez votre identité",
+        "confirm your identity",
+    )
+
+    if any(expression in contenu for expression in expressions):
+        return True
+
+    return _element_visible(page, (
+        "form[action*='checkpoint']",
+        "a[href*='/checkpoint/']",
+    ))
+
+
+def _captcha_visible(page, titre, texte):
+    contenu = " ".join([titre, texte])
+    expressions = (
+        "captcha",
+        "recaptcha",
+        "je ne suis pas un robot",
+        "i'm not a robot",
+        "i am not a robot",
+        "vérification de sécurité",
+        "verification de securite",
+    )
+
+    if any(expression in contenu for expression in expressions):
+        return True
+
+    return _element_visible(page, (
+        "iframe[src*='captcha']",
+        "iframe[src*='recaptcha']",
+        "form[action*='captcha']",
+        "[id*='captcha']",
+        "[class*='captcha']",
+    ))
 
 
 def _detecter_blocage(page, etape):
