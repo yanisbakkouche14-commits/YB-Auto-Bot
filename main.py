@@ -102,10 +102,17 @@ from scanner.marketplace import (
     tester_sante,
 )
 from user_settings import (
+    basculer_alertes,
+    definir_alertes,
     lister_alertes as lister_alertes_utilisateur,
     modifier_annee as modifier_annee_utilisateur,
+    modifier_benefice_min,
     modifier_budget as modifier_budget_utilisateur,
+    modifier_budget_min,
+    modifier_frequence_scan,
     modifier_km as modifier_km_utilisateur,
+    modifier_pays,
+    modifier_score_min,
     obtenir_parametres,
     supprimer_alerte as supprimer_alerte_utilisateur,
     supprimer_toutes_alertes,
@@ -207,7 +214,8 @@ PHRASES_BUSINESS = [
 MENU_PRINCIPAL_ACTIONS = [
     [("🏠 Accueil", "menu:home")],
     [("🔗 Analyser une annonce", "analysis:ask_link")],
-    [("🔥 Scanner Business", "menu:scanner"), ("⭐ Opportunités", "menu:opportunities")],
+    [("🔥 Scanner Business", "menu:scanner"), ("🌍 Scanner Europe", "menu:europe")],
+    [("🛒 Facebook Marketplace", "menu:marketplace"), ("⭐ Opportunités", "menu:opportunities")],
     [("❤️ Favoris", "menu:favorites"), ("📊 Tableau de bord", "menu:dashboard")],
     [("⚙️ Paramètres", "menu:settings"), ("ℹ️ Aide", "menu:help")],
 ]
@@ -245,14 +253,12 @@ def clavier_scanner_business():
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("✅ Activer", callback_data="scanner:enable"),
-            InlineKeyboardButton("🛑 Désactiver", callback_data="scanner:disable"),
+            InlineKeyboardButton("⛔ Désactiver", callback_data="scanner:disable"),
         ],
         [
-            InlineKeyboardButton("📌 Statut", callback_data="scanner:status"),
-            InlineKeyboardButton("🚀 Lancer un scan", callback_data="scanner:run"),
+            InlineKeyboardButton("📊 Statut", callback_data="scanner:status"),
+            InlineKeyboardButton("🚀 Lancer maintenant", callback_data="scanner:run"),
         ],
-        [InlineKeyboardButton("🌍 Scanner Europe", callback_data="scanner:europe")],
-        [InlineKeyboardButton("🛒 Facebook Marketplace", callback_data="scanner:marketplace")],
         [InlineKeyboardButton("⚙️ Paramètres", callback_data="scanner:settings")],
         [InlineKeyboardButton("🏠 Accueil", callback_data="menu:home")],
     ])
@@ -274,6 +280,7 @@ def clavier_favoris():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("❤️ Voir les favoris", callback_data="fav:list")],
         [InlineKeyboardButton("🗑️ Retirer un favori", callback_data="fav:delete")],
+        [InlineKeyboardButton("🧹 Supprimer tous les favoris", callback_data="fav:delete_all")],
         [InlineKeyboardButton("📉 Vérifier les prix maintenant", callback_data="fav:check")],
         [InlineKeyboardButton("🏠 Accueil", callback_data="menu:home")],
     ])
@@ -310,13 +317,77 @@ def clavier_tableau_de_bord():
 
 def clavier_parametres():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("💰 Budget maximum", callback_data="settings:budget")],
-        [InlineKeyboardButton("⭐ Score minimum", callback_data="settings:score")],
-        [InlineKeyboardButton("💵 Bénéfice minimum", callback_data="settings:benefit")],
-        [InlineKeyboardButton("🌍 Pays", callback_data="settings:country")],
-        [InlineKeyboardButton("⏱️ Fréquence du scan", callback_data="settings:frequency")],
+        [
+            InlineKeyboardButton("💰 Budget min", callback_data="settings:set:budget_min"),
+            InlineKeyboardButton("💰 Budget max", callback_data="settings:set:budget_max"),
+        ],
+        [
+            InlineKeyboardButton("🛣️ Km max", callback_data="settings:set:km_max"),
+            InlineKeyboardButton("📅 Année min", callback_data="settings:set:annee_min"),
+        ],
+        [
+            InlineKeyboardButton("⭐ Score min", callback_data="settings:set:score_min"),
+            InlineKeyboardButton("💵 Bénéfice min", callback_data="settings:set:benefice_min"),
+        ],
+        [
+            InlineKeyboardButton("🌍 Pays", callback_data="settings:set:pays"),
+            InlineKeyboardButton("⏱️ Fréquence", callback_data="settings:set:frequence"),
+        ],
+        [InlineKeyboardButton("🔔 Activer / désactiver alertes", callback_data="settings:toggle_alertes")],
+        [InlineKeyboardButton("🔎 Surveillances", callback_data="settings:surveillances")],
         [InlineKeyboardButton("🏠 Accueil", callback_data="menu:home")],
     ])
+
+
+def clavier_scanner_europe():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔎 Rechercher un modèle", callback_data="europe:search")],
+        [
+            InlineKeyboardButton("🇧🇪 Belgique", callback_data="europe:country:Belgique"),
+            InlineKeyboardButton("🇩🇪 Allemagne", callback_data="europe:country:Allemagne"),
+            InlineKeyboardButton("🇫🇷 France", callback_data="europe:country:France"),
+        ],
+        [
+            InlineKeyboardButton("🇳🇱 Pays-Bas", callback_data="europe:country:Pays-Bas"),
+            InlineKeyboardButton("🇱🇺 Luxembourg", callback_data="europe:country:Luxembourg"),
+        ],
+        [InlineKeyboardButton("📡 État des plateformes", callback_data="europe:sources")],
+        [InlineKeyboardButton("🏠 Accueil", callback_data="menu:home")],
+    ])
+
+
+def clavier_marketplace():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔎 Rechercher un modèle", callback_data="marketplace:search")],
+        [InlineKeyboardButton("📡 Statut Marketplace", callback_data="marketplace:status")],
+        [InlineKeyboardButton("🔄 Retester la santé", callback_data="marketplace:retry")],
+        [InlineKeyboardButton("🏠 Accueil", callback_data="menu:home")],
+    ])
+
+
+def clavier_surveillance_liste(chat_id):
+    lignes = []
+
+    for index, surveillance in enumerate(lister_surveillances(chat_id)[:20], start=1):
+        recherche, filtres = surveillance
+        libelle = f"🗑 {index}. {recherche}"
+        lignes.append([
+            InlineKeyboardButton(
+                libelle[:60],
+                callback_data=f"surv:delete:{index - 1}"
+            )
+        ])
+
+    if lignes:
+        lignes.append([InlineKeyboardButton("🧹 Supprimer toutes les surveillances", callback_data="surv:delete_all")])
+
+    lignes.append([
+        InlineKeyboardButton("🔕 Alertes OFF", callback_data="surv:alerts_off"),
+        InlineKeyboardButton("🔔 Alertes ON", callback_data="surv:alerts_on"),
+    ])
+    lignes.append([InlineKeyboardButton("⚙️ Paramètres", callback_data="menu:settings")])
+    lignes.append([InlineKeyboardButton("🏠 Accueil", callback_data="menu:home")])
+    return InlineKeyboardMarkup(lignes)
 
 
 def clavier_aide():
@@ -345,6 +416,24 @@ def texte_scanner_business():
     )
 
 
+def texte_scanner_europe():
+    return (
+        "🌍 Scanner Europe\n\n"
+        "Recherche une annonce sur les plateformes Belgique + Europe, "
+        "sans modifier le scanner /internet classique.\n\n"
+        "Choisis un pays de préférence ou lance une recherche."
+    )
+
+
+def texte_marketplace():
+    return (
+        "🛒 Facebook Marketplace\n\n"
+        "Marketplace fonctionne via le service local séparé. Si ton PC local "
+        "ou la session Facebook ne sont pas disponibles, les autres plateformes "
+        "continuent de fonctionner."
+    )
+
+
 def texte_opportunites():
     return (
         "⭐ Opportunités\n\n"
@@ -362,14 +451,31 @@ def texte_favoris():
 
 
 def texte_parametres():
-    return (
-        "⚙️ Paramètres\n\n"
-        f"Budget global actuel : {formater_prix(PRIX_MAX_GLOBAL)}\n"
-        "Score minimum global : 80/100\n"
-        "Bénéfice minimum global : 2 000 €\n"
-        "Pays : Belgique\n"
-        "Fréquence scanner global : toutes les 2 heures"
-    )
+    return "⚙️ Paramètres\n\nChoisis le réglage à modifier."
+
+
+def formater_etat_marketplace():
+    etat = etat_marketplace()
+    erreur = etat.get("derniere_erreur") or "Aucune erreur récente."
+    erreur_min = erreur.lower()
+
+    if "session facebook expir" in erreur_min or "authentification" in erreur_min:
+        statut = "Session Facebook expirée"
+    elif "service local" in erreur_min or "indisponible" in erreur_min:
+        statut = "Service local hors ligne"
+    elif etat.get("desactive_temporairement"):
+        statut = "Désactivé temporairement"
+    else:
+        statut = "Actif"
+
+    return "\n".join([
+        "🛒 ÉTAT FACEBOOK MARKETPLACE",
+        "",
+        f"Statut : {statut}",
+        f"Dernière réussite : {etat.get('derniere_reussite') or 'Inconnue'}",
+        f"Dernière erreur : {erreur}",
+        f"Échecs consécutifs : {etat.get('echecs_consecutifs', 0)}",
+    ])
 
 
 def texte_aide():
@@ -2154,9 +2260,17 @@ def _format_valeur_parametre(valeur, suffixe=""):
     return f"{texte}{suffixe}"
 
 
+def _format_liste_parametre(valeurs):
+    if not valeurs:
+        return "Non défini"
+
+    return ", ".join(str(valeur) for valeur in valeurs)
+
+
 def formater_parametres_utilisateur(chat_id):
     parametres = obtenir_parametres(chat_id)
     alertes = parametres.get("alertes", [])
+    alertes_activees = parametres.get("alertes_activees", True)
     lignes_alertes = []
 
     for index, alerte in enumerate(alertes, start=1):
@@ -2169,13 +2283,108 @@ def formater_parametres_utilisateur(chat_id):
     return "\n".join([
         "⚙️ MES PARAMÈTRES",
         "",
+        f"Budget min : {_format_valeur_parametre(parametres.get('budget_min'), ' €')}",
         f"Budget max : {_format_valeur_parametre(parametres.get('budget_max'), ' €')}",
-        f"Km max : {_format_valeur_parametre(parametres.get('km_max'))}",
+        f"Km max : {_format_valeur_parametre(parametres.get('km_max'), ' km')}",
         f"Année min : {_format_valeur_parametre(parametres.get('annee_min'))}",
+        f"Score min : {_format_valeur_parametre(parametres.get('score_min'), '/100')}",
+        f"Bénéfice min : {_format_valeur_parametre(parametres.get('benefice_min'), ' €')}",
+        f"Pays : {_format_liste_parametre(parametres.get('pays'))}",
+        f"Fréquence scan : toutes les {_format_valeur_parametre(parametres.get('frequence_scan_heures'))} h",
+        f"Alertes : {'activées' if alertes_activees else 'désactivées'}",
         "",
         "Alertes actives :",
         *lignes_alertes,
     ])
+
+
+def formater_surveillance_liste(chat_id):
+    surveillances = lister_surveillances(chat_id)
+
+    if not surveillances:
+        return "🔔 MES SURVEILLANCES\n\nAucune recherche surveillée."
+
+    lignes = ["🔔 MES SURVEILLANCES", ""]
+
+    for index, (recherche, filtres) in enumerate(surveillances, start=1):
+        lignes.extend([
+            f"{index}. {recherche}",
+            f"Filtres : {formater_filtres(filtres)}",
+            "Date : non disponible",
+            "",
+        ])
+
+    return "\n".join(lignes).strip()
+
+
+def supprimer_toutes_surveillances(chat_id):
+    total = 0
+
+    for recherche, filtres in list(lister_surveillances(chat_id)):
+        if supprimer_surveillance(recherche, chat_id, filtres):
+            total += 1
+
+    return total
+
+
+PARAMETRES_SAISIE = {
+    "budget_min": {
+        "invite": "💰 Envoie le budget minimum en euros, par exemple : 5000.",
+        "nom": "Budget minimum",
+    },
+    "budget_max": {
+        "invite": "💰 Envoie le budget maximum en euros, par exemple : 15000.",
+        "nom": "Budget maximum",
+    },
+    "km_max": {
+        "invite": "🛣️ Envoie le kilométrage maximum, par exemple : 120000.",
+        "nom": "Kilométrage maximum",
+    },
+    "annee_min": {
+        "invite": "📅 Envoie l'année minimale, par exemple : 2017.",
+        "nom": "Année minimale",
+    },
+    "score_min": {
+        "invite": "⭐ Envoie le score minimum entre 0 et 100, par exemple : 80.",
+        "nom": "Score minimum",
+    },
+    "benefice_min": {
+        "invite": "💵 Envoie le bénéfice minimum en euros, par exemple : 2500.",
+        "nom": "Bénéfice minimum",
+    },
+    "pays": {
+        "invite": "🌍 Envoie les pays séparés par des virgules, par exemple : Belgique, Allemagne.",
+        "nom": "Pays",
+    },
+    "frequence": {
+        "invite": "⏱️ Envoie la fréquence en heures entre 1 et 24, par exemple : 2.",
+        "nom": "Fréquence du scan",
+    },
+}
+
+
+def appliquer_parametre_utilisateur(chat_id, champ, valeur):
+    if champ == "budget_min":
+        return modifier_budget_min(chat_id, int(valeur))
+    if champ == "budget_max":
+        return modifier_budget_utilisateur(chat_id, int(valeur))
+    if champ == "km_max":
+        return modifier_km_utilisateur(chat_id, int(valeur))
+    if champ == "annee_min":
+        annee = int(valeur)
+        if annee < 1950 or annee > datetime.now().year + 1:
+            raise ValueError("Année invalide.")
+        return modifier_annee_utilisateur(chat_id, annee)
+    if champ == "score_min":
+        return modifier_score_min(chat_id, int(valeur))
+    if champ == "benefice_min":
+        return modifier_benefice_min(chat_id, int(valeur))
+    if champ == "pays":
+        return modifier_pays(chat_id, valeur)
+    if champ == "frequence":
+        return modifier_frequence_scan(chat_id, int(valeur))
+
+    raise ValueError("Paramètre inconnu.")
 
 
 async def modifier_budget_commande(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2868,6 +3077,10 @@ async def interface_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await afficher_menu_callback(query, texte_accueil(), clavier_principal())
     elif data == "menu:scanner":
         await afficher_menu_callback(query, texte_scanner_business(), clavier_scanner_business())
+    elif data == "menu:europe":
+        await afficher_menu_callback(query, texte_scanner_europe(), clavier_scanner_europe())
+    elif data == "menu:marketplace":
+        await afficher_menu_callback(query, texte_marketplace(), clavier_marketplace())
     elif data == "menu:opportunities":
         await afficher_menu_callback(query, texte_opportunites(), clavier_opportunites())
     elif data == "menu:favorites":
@@ -2875,7 +3088,7 @@ async def interface_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     elif data == "menu:dashboard":
         await afficher_menu_callback(query, generer_tableau_de_bord(chat_id), clavier_tableau_de_bord())
     elif data == "menu:settings":
-        await afficher_menu_callback(query, texte_parametres(), clavier_parametres())
+        await afficher_menu_callback(query, formater_parametres_utilisateur(chat_id), clavier_parametres())
     elif data == "menu:help":
         await afficher_menu_callback(query, texte_aide(), clavier_aide())
     elif data == "analysis:ask_link":
@@ -2902,24 +3115,14 @@ async def interface_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     elif data == "scanner:status":
         await afficher_menu_callback(query, generer_statut_scanner_global(chat_id), clavier_scanner_business())
     elif data == "scanner:europe":
-        context.user_data["attente_scan_europe"] = True
-        await afficher_menu_callback(
-            query,
-            "🌍 Envoie le modèle à scanner en Europe, par exemple : Golf GTI.",
-            clavier_scanner_business()
-        )
+        await afficher_menu_callback(query, texte_scanner_europe(), clavier_scanner_europe())
     elif data == "scanner:marketplace":
-        context.user_data["attente_scan_marketplace"] = True
-        await afficher_menu_callback(
-            query,
-            "🛒 Envoie le modèle à rechercher sur Facebook Marketplace.",
-            clavier_scanner_business()
-        )
+        await afficher_menu_callback(query, texte_marketplace(), clavier_marketplace())
     elif data == "scanner:run":
         if scan_global_en_cours:
             await afficher_menu_callback(
                 query,
-                "⏳ Un scan est déjà en cours. Merci de patienter quelques minutes.",
+                "⏳ Un scan est déjà en cours. Merci de patienter.",
                 clavier_scanner_business()
             )
             return
@@ -2934,7 +3137,7 @@ async def interface_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if resultat == "busy":
             await context.bot.send_message(
                 chat_id=chat_id,
-                text="⏳ Un scan est déjà en cours. Merci de patienter quelques minutes."
+                text="⏳ Un scan est déjà en cours. Merci de patienter."
             )
         elif resultat == "inactive":
             await context.bot.send_message(
@@ -2942,7 +3145,44 @@ async def interface_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 text="ℹ️ Active d'abord le Scanner Business global."
             )
     elif data == "scanner:settings":
-        await afficher_menu_callback(query, texte_parametres(), clavier_scanner_business())
+        await afficher_menu_callback(query, formater_parametres_utilisateur(chat_id), clavier_parametres())
+    elif data == "europe:search":
+        context.user_data["attente_scan_europe"] = True
+        await afficher_menu_callback(
+            query,
+            "🌍 Envoie le modèle à scanner en Europe, par exemple : Golf GTI.",
+            clavier_scanner_europe()
+        )
+    elif data.startswith("europe:country:"):
+        pays = data.rsplit(":", 1)[1]
+        modifier_pays(chat_id, pays)
+        await afficher_menu_callback(
+            query,
+            f"✅ Pays préféré mis à jour : {pays}\n\n{texte_scanner_europe()}",
+            clavier_scanner_europe()
+        )
+    elif data == "europe:sources":
+        await afficher_menu_callback(
+            query,
+            formater_sources(stats_sources() + [source_marketplace_etat()]),
+            clavier_scanner_europe()
+        )
+    elif data == "marketplace:search":
+        context.user_data["attente_scan_marketplace"] = True
+        await afficher_menu_callback(
+            query,
+            "🛒 Envoie le modèle à rechercher sur Facebook Marketplace.",
+            clavier_marketplace()
+        )
+    elif data == "marketplace:status":
+        await afficher_menu_callback(query, formater_etat_marketplace(), clavier_marketplace())
+    elif data == "marketplace:retry":
+        tester_sante()
+        await afficher_menu_callback(
+            query,
+            "🔄 Test de santé Marketplace effectué.\n\n" + formater_etat_marketplace(),
+            clavier_marketplace()
+        )
     elif data == "opp:top_week":
         await afficher_menu_callback(
             query,
@@ -3072,6 +3312,19 @@ async def interface_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             texte + "\n\n" + formater_liste_favoris(chat_id),
             clavier_liste_favoris(chat_id)
         )
+    elif data == "fav:delete_all":
+        favoris = list(lister_favoris(chat_id))
+        total = 0
+
+        for favori in favoris:
+            if supprimer_favori_par_id(chat_id, favori["id"]):
+                total += 1
+
+        await afficher_menu_callback(
+            query,
+            f"🧹 {total} favori(s) retiré(s).\n\n" + formater_liste_favoris(chat_id),
+            clavier_liste_favoris(chat_id)
+        )
     elif data == "fav:check":
         await afficher_menu_callback(
             query,
@@ -3124,8 +3377,71 @@ async def interface_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             formater_sources(stats_sources() + [source_marketplace_etat()]),
             clavier_tableau_de_bord()
         )
-    elif data.startswith("settings:"):
-        await afficher_menu_callback(query, "⚙️ Paramètres\n\nLes réglages personnalisés par bouton seront ajoutés à la prochaine étape.", clavier_parametres())
+    elif data.startswith("settings:set:"):
+        champ = data.rsplit(":", 1)[1]
+        definition = PARAMETRES_SAISIE.get(champ)
+
+        if not definition:
+            await afficher_menu_callback(query, "⚙️ Paramètre inconnu.", clavier_parametres())
+            return
+
+        context.user_data["attente_parametre"] = champ
+        await afficher_menu_callback(query, definition["invite"], clavier_parametres())
+    elif data == "settings:toggle_alertes":
+        parametres = basculer_alertes(chat_id)
+        etat = "activées" if parametres.get("alertes_activees", True) else "désactivées"
+        await afficher_menu_callback(
+            query,
+            f"🔔 Alertes {etat}.\n\n" + formater_parametres_utilisateur(chat_id),
+            clavier_parametres()
+        )
+    elif data == "settings:surveillances":
+        await afficher_menu_callback(
+            query,
+            formater_surveillance_liste(chat_id),
+            clavier_surveillance_liste(chat_id)
+        )
+    elif data.startswith("surv:delete:"):
+        index = int(data.rsplit(":", 1)[1])
+        surveillances = lister_surveillances(chat_id)
+
+        if index < 0 or index >= len(surveillances):
+            await afficher_menu_callback(
+                query,
+                "ℹ️ Surveillance introuvable.",
+                clavier_surveillance_liste(chat_id)
+            )
+            return
+
+        recherche, filtres = surveillances[index]
+        supprimee = supprimer_surveillance(recherche, chat_id, filtres)
+        texte = "🗑 Surveillance supprimée." if supprimee else "ℹ️ Surveillance introuvable."
+        await afficher_menu_callback(
+            query,
+            texte + "\n\n" + formater_surveillance_liste(chat_id),
+            clavier_surveillance_liste(chat_id)
+        )
+    elif data == "surv:delete_all":
+        total = supprimer_toutes_surveillances(chat_id)
+        await afficher_menu_callback(
+            query,
+            f"🧹 {total} surveillance(s) supprimée(s).\n\n" + formater_surveillance_liste(chat_id),
+            clavier_surveillance_liste(chat_id)
+        )
+    elif data == "surv:alerts_off":
+        definir_alertes(chat_id, False)
+        await afficher_menu_callback(
+            query,
+            "🔕 Alertes désactivées.\n\n" + formater_parametres_utilisateur(chat_id),
+            clavier_surveillance_liste(chat_id)
+        )
+    elif data == "surv:alerts_on":
+        definir_alertes(chat_id, True)
+        await afficher_menu_callback(
+            query,
+            "🔔 Alertes activées.\n\n" + formater_parametres_utilisateur(chat_id),
+            clavier_surveillance_liste(chat_id)
+        )
     elif data == "help:scores":
         await afficher_menu_callback(query, "⭐ Scores\n\nLe score IA évalue la qualité de l'annonce selon le prix, la marge et le contexte véhicule.", clavier_aide())
     elif data == "help:business_score":
@@ -3136,6 +3452,27 @@ async def interface_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def gerer_reply_keyboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texte = (update.message.text or "").strip()
+
+    if context.user_data.get("attente_parametre"):
+        champ = context.user_data.pop("attente_parametre", None)
+        definition = PARAMETRES_SAISIE.get(champ, {"nom": "Paramètre"})
+
+        try:
+            appliquer_parametre_utilisateur(update.effective_chat.id, champ, texte)
+        except (TypeError, ValueError):
+            await update.message.reply_text(
+                f"❌ Valeur invalide pour {definition['nom']}.\n"
+                f"{definition.get('invite', '')}",
+                reply_markup=clavier_parametres()
+            )
+            return
+
+        await update.message.reply_text(
+            f"✅ {definition['nom']} mis à jour.\n\n"
+            + formater_parametres_utilisateur(update.effective_chat.id),
+            reply_markup=clavier_parametres()
+        )
+        return
 
     if context.user_data.get("attente_stats_modele"):
         context.user_data.pop("attente_stats_modele", None)
@@ -3202,8 +3539,18 @@ async def gerer_reply_keyboard(update: Update, context: ContextTypes.DEFAULT_TYP
 
     if texte == "🏠 Accueil":
         await update.message.reply_text(texte_accueil(), reply_markup=clavier_principal())
+    elif texte == "🔗 Analyser une annonce":
+        context.user_data["attente_analyse_lien"] = True
+        await update.message.reply_text(
+            "🔗 Colle le lien AutoScout24 ou 2ememain à analyser.",
+            reply_markup=clavier_retour_accueil()
+        )
     elif texte == "🔥 Scanner Business":
         await update.message.reply_text(texte_scanner_business(), reply_markup=clavier_scanner_business())
+    elif texte == "🌍 Scanner Europe":
+        await update.message.reply_text(texte_scanner_europe(), reply_markup=clavier_scanner_europe())
+    elif texte == "🛒 Facebook Marketplace":
+        await update.message.reply_text(texte_marketplace(), reply_markup=clavier_marketplace())
     elif texte == "⭐ Opportunités":
         await update.message.reply_text(texte_opportunites(), reply_markup=clavier_opportunites())
     elif texte == "❤️ Favoris":
@@ -3211,7 +3558,7 @@ async def gerer_reply_keyboard(update: Update, context: ContextTypes.DEFAULT_TYP
     elif texte == "📊 Tableau de bord":
         await update.message.reply_text(generer_tableau_de_bord(update.effective_chat.id), reply_markup=clavier_tableau_de_bord())
     elif texte == "⚙️ Paramètres":
-        await update.message.reply_text(texte_parametres(), reply_markup=clavier_parametres())
+        await update.message.reply_text(formater_parametres_utilisateur(update.effective_chat.id), reply_markup=clavier_parametres())
     elif texte == "ℹ️ Aide":
         await update.message.reply_text(texte_aide(), reply_markup=clavier_aide())
 
