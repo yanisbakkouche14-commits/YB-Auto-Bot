@@ -14,6 +14,9 @@ TIMEOUT_MS = 10000
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8787
 DEFAULT_PROFILE_DIR = "local_facebook_profile"
+ENV_PROFILE_DIR = "MARKETPLACE_PROFILE_DIR"
+ENV_BROWSER_EXECUTABLE = "MARKETPLACE_BROWSER_EXECUTABLE"
+ENV_HEADLESS = "MARKETPLACE_HEADLESS"
 
 logger = logging.getLogger("marketplace_local_service")
 
@@ -32,7 +35,53 @@ def _env_token():
 
 
 def _profile_dir():
-    return Path(os.getenv("MARKETPLACE_PROFILE_DIR", DEFAULT_PROFILE_DIR))
+    return Path(os.getenv(ENV_PROFILE_DIR, DEFAULT_PROFILE_DIR)).expanduser().resolve()
+
+
+def _browser_executable():
+    executable = os.getenv(ENV_BROWSER_EXECUTABLE, "").strip()
+    return Path(executable).expanduser().resolve() if executable else None
+
+
+def _headless():
+    return os.getenv(ENV_HEADLESS, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _systeme():
+    return "windows" if os.name == "nt" else "linux"
+
+
+def _est_linux():
+    return os.name != "nt"
+
+
+def _profil_existe():
+    profil = _profile_dir()
+
+    if not profil.exists() or not profil.is_dir():
+        return False
+
+    try:
+        return any(profil.iterdir())
+    except OSError:
+        return False
+
+
+def _verifier_navigateur_configure():
+    executable = _browser_executable()
+
+    if executable and not executable.exists():
+        raise MarketplaceLocalError(
+            "BROWSER_MISSING",
+            "Navigateur Chromium introuvable. Vérifie MARKETPLACE_BROWSER_EXECUTABLE.",
+            "lancement Playwright",
+            {
+                "browser_configure": str(executable),
+                "variable": ENV_BROWSER_EXECUTABLE,
+            },
+        )
+
+    return executable
 
 
 def _nombre(texte):
@@ -108,13 +157,33 @@ def _import_playwright():
         from playwright.sync_api import sync_playwright
     except Exception as exc:
         raise MarketplaceLocalError(
-            "PLAYWRIGHT_ERROR",
-            "Impossible de charger Playwright sur le PC local.",
+            "PLAYWRIGHT_MISSING",
+            "Playwright est absent ou impossible à charger sur cet appareil.",
             "lancement Playwright",
             {"type_exception": type(exc).__name__},
         ) from exc
 
     return sync_playwright
+
+
+def _options_contexte(headless=None):
+    executable = _verifier_navigateur_configure()
+    options = {
+        "user_data_dir": str(_profile_dir()),
+        "headless": _headless() if headless is None else bool(headless),
+        "viewport": {"width": 1366, "height": 900},
+    }
+
+    if executable:
+        options["executable_path"] = str(executable)
+
+    if _est_linux():
+        options["args"] = [
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+        ]
+
+    return options
 
 
 def _diagnostic_page(page, etape, nombre_cartes=None):
@@ -306,7 +375,7 @@ def _detecter_blocage(page, etape):
     if diagnostic["login_detecte"]:
         raise MarketplaceLocalError(
             "SESSION_EXPIRED",
-            "Session Facebook expirée : reconnecte-toi manuellement sur le PC.",
+            "Session Facebook expirée : reconnecte-toi manuellement sur l'appareil local.",
             etape,
             diagnostic,
         )
@@ -346,14 +415,49 @@ def _message_erreur_etape(etape):
     return messages.get(etape, "Erreur locale Marketplace inattendue.")
 
 
+def diagnostic_local():
+    executable = _browser_executable()
+    options = _options_contexte(headless=_headless()) if not executable or executable.exists() else {}
+    diagnostic = {
+        "ok": True,
+        "service": "marketplace_local",
+        "systeme": _systeme(),
+        "profile_dir": str(_profile_dir()),
+        "profile_exists": _profil_existe(),
+        "browser_executable": str(executable) if executable else "playwright_default",
+        "browser_exists": executable.exists() if executable else None,
+        "browser_used": str(executable) if executable else "Playwright default bundled browser",
+        "chromium_args": options.get("args", []),
+        "headless": _headless(),
+        "playwright_available": False,
+        "errors": [],
+    }
+
+    if executable and not executable.exists():
+        diagnostic["ok"] = False
+        diagnostic["errors"].append("BROWSER_MISSING")
+
+    if not diagnostic["profile_exists"]:
+        diagnostic["ok"] = False
+        diagnostic["errors"].append("PROFILE_MISSING")
+
+    try:
+        _import_playwright()
+        diagnostic["playwright_available"] = True
+    except MarketplaceLocalError:
+        diagnostic["ok"] = False
+        diagnostic["errors"].append("PLAYWRIGHT_MISSING")
+
+    return diagnostic
+
+
 def ouvrir_connexion_manuelle():
     sync_playwright = _import_playwright()
+    _profile_dir().mkdir(parents=True, exist_ok=True)
 
     with sync_playwright() as playwright:
         contexte = playwright.chromium.launch_persistent_context(
-            user_data_dir=str(_profile_dir()),
-            headless=False,
-            viewport={"width": 1366, "height": 900},
+            **_options_contexte(headless=False)
         )
         page = contexte.new_page()
         page.goto(f"{BASE_URL}/marketplace/", wait_until="domcontentloaded")
@@ -374,14 +478,24 @@ def rechercher_marketplace(modele, limite=MAX_ANNONCES):
         with sync_playwright() as playwright:
             etape = "chargement du profil"
             profil = _profile_dir()
+
+            if not _profil_existe():
+                raise MarketplaceLocalError(
+                    "PROFILE_MISSING",
+                    "Profil Facebook local absent : lance d'abord le mode --login.",
+                    etape,
+                    {
+                        "profile_dir": str(profil),
+                        "variable": ENV_PROFILE_DIR,
+                    },
+                )
+
             logger.info(
                 "Marketplace local utilise le profil persistant configure."
             )
             etape = "lancement Playwright"
             contexte = playwright.chromium.launch_persistent_context(
-                user_data_dir=str(profil),
-                headless=False,
-                viewport={"width": 1366, "height": 900},
+                **_options_contexte()
             )
             etape = "ouverture Facebook"
             page = contexte.new_page()
@@ -483,7 +597,8 @@ class MarketplaceHandler(BaseHTTPRequestHandler):
         chemin = urlparse(self.path)
 
         if chemin.path == "/health":
-            return self._json(200, {"ok": True, "service": "marketplace_local"})
+            diagnostic = diagnostic_local()
+            return self._json(200 if diagnostic["ok"] else 503, diagnostic)
 
         if not self._autorise():
             return self._json(401, {"ok": False, "erreur": "Token local invalide."})
@@ -536,11 +651,16 @@ def lancer_service(host=DEFAULT_HOST, port=DEFAULT_PORT):
 def main():
     parser = argparse.ArgumentParser(description="Service local Facebook Marketplace")
     parser.add_argument("--login", action="store_true", help="ouvre une session Facebook manuelle")
+    parser.add_argument("--health", action="store_true", help="affiche un diagnostic local non sensible")
     parser.add_argument("--host", default=DEFAULT_HOST)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO)
+
+    if args.health:
+        print(json.dumps(diagnostic_local(), ensure_ascii=False, indent=2))
+        return
 
     if args.login:
         ouvrir_connexion_manuelle()

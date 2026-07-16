@@ -1,3 +1,8 @@
 local_facebook_profile/
 .facebook_marketplace_profile/
 playwright-facebook-profile/
+.yb-auto/
+marketplace_android_profile/
+marketplace_local.env
+marketplace_service.log
+cloudflared.log
