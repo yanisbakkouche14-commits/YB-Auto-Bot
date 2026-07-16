@@ -192,7 +192,11 @@ def _rechercher_service_local(modele):
         ) from erreur
 
     if not donnees.get("ok"):
-        erreur = donnees.get("erreur") or "service local Marketplace indisponible"
+        erreur = (
+            donnees.get("message")
+            or donnees.get("erreur")
+            or "service local Marketplace indisponible"
+        )
 
         if "session facebook expirée" in erreur.lower():
             raise MarketplaceAuthentificationRequise(erreur)

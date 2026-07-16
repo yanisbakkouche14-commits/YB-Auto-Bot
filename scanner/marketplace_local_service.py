@@ -18,6 +18,15 @@ DEFAULT_PROFILE_DIR = "local_facebook_profile"
 logger = logging.getLogger("marketplace_local_service")
 
 
+class MarketplaceLocalError(RuntimeError):
+    def __init__(self, code, message, etape, diagnostic=None):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.etape = etape
+        self.diagnostic = diagnostic or {}
+
+
 def _env_token():
     return os.getenv("MARKETPLACE_LOCAL_TOKEN", "").strip()
 
@@ -98,35 +107,148 @@ def _import_playwright():
     try:
         from playwright.sync_api import sync_playwright
     except Exception as exc:
-        raise RuntimeError(
-            "Playwright n'est pas installé sur ce PC local."
+        raise MarketplaceLocalError(
+            "PLAYWRIGHT_ERROR",
+            "Impossible de charger Playwright sur le PC local.",
+            "lancement Playwright",
+            {"type_exception": type(exc).__name__},
         ) from exc
 
     return sync_playwright
 
 
-def _detecter_blocage(page):
-    titre = page.title()
-    url = page.url.lower()
-    html = page.content().lower()
-    texte = page.locator("body").inner_text(timeout=2000).lower()
-    contenu = " ".join([titre.lower(), url, html, texte])
+def _diagnostic_page(page, etape, nombre_cartes=None):
+    diagnostic = {
+        "etape": etape,
+        "url_finale": "Inconnu",
+        "titre_page": "Inconnu",
+        "login_detecte": False,
+        "checkpoint_detecte": False,
+        "captcha_detecte": False,
+        "marketplace_detecte": False,
+        "nombre_cartes_marketplace": nombre_cartes,
+    }
 
-    if "captcha" in contenu:
-        return "Captcha Facebook détecté : intervention manuelle requise."
+    try:
+        diagnostic["url_finale"] = page.url
+    except Exception:
+        pass
 
-    if "checkpoint" in contenu:
-        return "Checkpoint Facebook détecté : intervention manuelle requise."
+    try:
+        diagnostic["titre_page"] = page.title()
+    except Exception:
+        pass
 
-    if (
-        "login" in url
+    try:
+        html = page.content().lower()
+    except Exception:
+        html = ""
+
+    try:
+        texte = page.locator("body").inner_text(timeout=2000).lower()
+    except Exception:
+        texte = ""
+
+    contenu = " ".join([
+        str(diagnostic["url_finale"]).lower(),
+        str(diagnostic["titre_page"]).lower(),
+        html,
+        texte,
+    ])
+
+    diagnostic["login_detecte"] = (
+        "login" in str(diagnostic["url_finale"]).lower()
         or "connectez-vous" in contenu
         or "se connecter" in contenu
         or "log in to facebook" in contenu
-    ):
-        return "Session Facebook expirée : reconnecte-toi manuellement sur le PC."
+    )
+    diagnostic["checkpoint_detecte"] = "checkpoint" in contenu
+    diagnostic["captcha_detecte"] = "captcha" in contenu
+    diagnostic["marketplace_detecte"] = "marketplace" in contenu
 
-    return None
+    if nombre_cartes is None:
+        try:
+            diagnostic["nombre_cartes_marketplace"] = page.locator(
+                "a[href*='/marketplace/item/']"
+            ).count()
+        except Exception:
+            diagnostic["nombre_cartes_marketplace"] = None
+
+    logger.info(
+        "Marketplace local diagnostic: etape=%s url_finale=%s titre_page=%r "
+        "login=%s checkpoint=%s captcha=%s marketplace=%s cartes=%s",
+        diagnostic["etape"],
+        diagnostic["url_finale"],
+        diagnostic["titre_page"],
+        diagnostic["login_detecte"],
+        diagnostic["checkpoint_detecte"],
+        diagnostic["captcha_detecte"],
+        diagnostic["marketplace_detecte"],
+        diagnostic["nombre_cartes_marketplace"],
+    )
+    return diagnostic
+
+
+def _detecter_blocage(page, etape):
+    diagnostic = _diagnostic_page(page, etape)
+
+    if diagnostic["captcha_detecte"]:
+        raise MarketplaceLocalError(
+            "CAPTCHA_DETECTED",
+            "Captcha Facebook détecté : intervention manuelle requise.",
+            etape,
+            diagnostic,
+        )
+
+    if diagnostic["checkpoint_detecte"]:
+        raise MarketplaceLocalError(
+            "CHECKPOINT_DETECTED",
+            "Checkpoint Facebook détecté : intervention manuelle requise.",
+            etape,
+            diagnostic,
+        )
+
+    if diagnostic["login_detecte"]:
+        raise MarketplaceLocalError(
+            "SESSION_EXPIRED",
+            "Session Facebook expirée : reconnecte-toi manuellement sur le PC.",
+            etape,
+            diagnostic,
+        )
+
+    return diagnostic
+
+
+def _payload_erreur(erreur):
+    if isinstance(erreur, MarketplaceLocalError):
+        return {
+            "ok": False,
+            "code": erreur.code,
+            "message": erreur.message,
+            "etape": erreur.etape,
+            "diagnostic": erreur.diagnostic,
+            "annonces": [],
+        }
+
+    return {
+        "ok": False,
+        "code": "PLAYWRIGHT_ERROR",
+        "message": "Erreur locale Marketplace inattendue.",
+        "etape": "inconnue",
+        "diagnostic": {"type_exception": type(erreur).__name__},
+        "annonces": [],
+    }
+
+
+def _message_erreur_etape(etape):
+    messages = {
+        "lancement Playwright": "Impossible de lancer le navigateur.",
+        "chargement du profil": "Impossible de charger le profil navigateur local.",
+        "ouverture Facebook": "Impossible d'ouvrir Facebook Marketplace.",
+        "recherche": "Impossible de vérifier la session Facebook.",
+        "extraction": "Impossible d'extraire les annonces Marketplace.",
+    }
+    return messages.get(etape, "Erreur locale Marketplace inattendue.")
 
 
 def ouvrir_connexion_manuelle():
@@ -147,69 +269,99 @@ def ouvrir_connexion_manuelle():
 
 
 def rechercher_marketplace(modele, limite=MAX_ANNONCES):
+    etape = "lancement Playwright"
     sync_playwright = _import_playwright()
     limite = max(1, min(int(limite or MAX_ANNONCES), MAX_ANNONCES))
     url = f"{BASE_URL}/marketplace/search/?query={quote_plus(modele)}&exact=false"
+    contexte = None
 
-    with sync_playwright() as playwright:
-        contexte = playwright.chromium.launch_persistent_context(
-            user_data_dir=str(_profile_dir()),
-            headless=False,
-            viewport={"width": 1366, "height": 900},
-        )
-        page = contexte.new_page()
-        page.goto(url, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
+    try:
+        with sync_playwright() as playwright:
+            etape = "chargement du profil"
+            profil = _profile_dir()
+            logger.info(
+                "Marketplace local utilise le profil persistant configure."
+            )
+            etape = "lancement Playwright"
+            contexte = playwright.chromium.launch_persistent_context(
+                user_data_dir=str(profil),
+                headless=False,
+                viewport={"width": 1366, "height": 900},
+            )
+            etape = "ouverture Facebook"
+            page = contexte.new_page()
+            page.goto(url, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
 
-        blocage = _detecter_blocage(page)
-        if blocage:
-            contexte.close()
+            etape = "recherche"
+            _detecter_blocage(page, etape)
+
+            page.wait_for_timeout(1500)
+            etape = "extraction"
+            liens = page.locator("a[href*='/marketplace/item/']")
+            nombre_cartes = liens.count()
+            diagnostic = _diagnostic_page(page, etape, nombre_cartes=nombre_cartes)
+            annonces = []
+            liens_vus = set()
+
+            for index in range(min(nombre_cartes, limite * 2)):
+                element = liens.nth(index)
+                href = element.get_attribute("href") or ""
+
+                if not href:
+                    continue
+
+                lien = href if href.startswith("http") else f"{BASE_URL}{href}"
+
+                if lien in liens_vus:
+                    continue
+
+                texte = element.inner_text(timeout=2000)
+
+                if len(texte.strip()) < 8:
+                    continue
+
+                liens_vus.add(lien)
+                annonces.append({
+                    "titre": _titre(texte, modele),
+                    "prix": _prix(texte),
+                    "annee": _annee(texte),
+                    "kilometrage": _kilometrage(texte),
+                    "ville": _ville(texte),
+                    "lien": lien,
+                })
+
+                if len(annonces) >= limite:
+                    break
+
+            logger.info(
+                "Marketplace local extraction terminee: cartes=%s annonces=%s",
+                nombre_cartes,
+                len(annonces),
+            )
             return {
-                "ok": False,
-                "erreur": blocage,
-                "annonces": [],
+                "ok": True,
+                "code": "OK",
+                "message": None,
+                "erreur": None,
+                "diagnostic": diagnostic,
+                "annonces": annonces,
             }
-
-        page.wait_for_timeout(1500)
-        liens = page.locator("a[href*='/marketplace/item/']")
-        annonces = []
-        liens_vus = set()
-
-        for index in range(min(liens.count(), limite * 2)):
-            element = liens.nth(index)
-            href = element.get_attribute("href") or ""
-
-            if not href:
-                continue
-
-            lien = href if href.startswith("http") else f"{BASE_URL}{href}"
-
-            if lien in liens_vus:
-                continue
-
-            texte = element.inner_text(timeout=2000)
-
-            if len(texte.strip()) < 8:
-                continue
-
-            liens_vus.add(lien)
-            annonces.append({
-                "titre": _titre(texte, modele),
-                "prix": _prix(texte),
-                "annee": _annee(texte),
-                "kilometrage": _kilometrage(texte),
-                "ville": _ville(texte),
-                "lien": lien,
-            })
-
-            if len(annonces) >= limite:
-                break
-
-        contexte.close()
-        return {
-            "ok": True,
-            "erreur": None,
-            "annonces": annonces,
-        }
+    except MarketplaceLocalError:
+        raise
+    except Exception as exc:
+        diagnostic = {"type_exception": type(exc).__name__}
+        raise MarketplaceLocalError(
+            "PLAYWRIGHT_ERROR",
+            _message_erreur_etape(etape),
+            etape,
+            diagnostic,
+        ) from exc
+    finally:
+        if contexte is not None:
+            try:
+                contexte.close()
+            except Exception:
+                logger.warning("Impossible de fermer le contexte Playwright proprement.")
 
 
 class MarketplaceHandler(BaseHTTPRequestHandler):
@@ -254,10 +406,23 @@ class MarketplaceHandler(BaseHTTPRequestHandler):
         try:
             resultat = rechercher_marketplace(modele, limite=limite)
         except Exception as exc:
-            logger.warning("Marketplace local indisponible: %s", exc)
-            return self._json(503, {"ok": False, "erreur": str(exc), "annonces": []})
+            logger.exception(
+                "Marketplace local 503: type=%s message=%s",
+                type(exc).__name__,
+                exc,
+            )
+            return self._json(503, _payload_erreur(exc))
 
         statut = 200 if resultat.get("ok") else 503
+        if statut == 503:
+            logger.warning(
+                "Marketplace local 503: code=%s message=%s etape=%s "
+                "diagnostic=%s",
+                resultat.get("code"),
+                resultat.get("message") or resultat.get("erreur"),
+                resultat.get("etape"),
+                resultat.get("diagnostic"),
+            )
         return self._json(statut, resultat)
 
 
