@@ -101,6 +101,15 @@ from scanner.marketplace import (
     retour_a_notifier,
     tester_sante,
 )
+from user_settings import (
+    lister_alertes as lister_alertes_utilisateur,
+    modifier_annee as modifier_annee_utilisateur,
+    modifier_budget as modifier_budget_utilisateur,
+    modifier_km as modifier_km_utilisateur,
+    obtenir_parametres,
+    supprimer_alerte as supprimer_alerte_utilisateur,
+    supprimer_toutes_alertes,
+)
 
 
 SCORE_ALERTE_MINIMUM = 80
@@ -2133,6 +2142,155 @@ async def stats_modele_commande(update: Update, context: ContextTypes.DEFAULT_TY
     await update.message.reply_text(texte, reply_markup=clavier_tableau_de_bord())
 
 
+def _chat_id(update):
+    return update.effective_user.id
+
+
+def _format_valeur_parametre(valeur, suffixe=""):
+    if valeur in (None, ""):
+        return "Non défini"
+
+    texte = f"{int(valeur):,}".replace(",", " ")
+    return f"{texte}{suffixe}"
+
+
+def formater_parametres_utilisateur(chat_id):
+    parametres = obtenir_parametres(chat_id)
+    alertes = parametres.get("alertes", [])
+    lignes_alertes = []
+
+    for index, alerte in enumerate(alertes, start=1):
+        texte = alerte.get("texte") or "Alerte"
+        lignes_alertes.append(f"{alerte.get('id', index)}. {texte}")
+
+    if not lignes_alertes:
+        lignes_alertes.append("Aucune alerte active.")
+
+    return "\n".join([
+        "⚙️ MES PARAMÈTRES",
+        "",
+        f"Budget max : {_format_valeur_parametre(parametres.get('budget_max'), ' €')}",
+        f"Km max : {_format_valeur_parametre(parametres.get('km_max'))}",
+        f"Année min : {_format_valeur_parametre(parametres.get('annee_min'))}",
+        "",
+        "Alertes actives :",
+        *lignes_alertes,
+    ])
+
+
+async def modifier_budget_commande(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("❌ Utilisation : /modifier_budget 15000")
+        return
+
+    try:
+        parametres = modifier_budget_utilisateur(_chat_id(update), context.args[0])
+    except ValueError:
+        await update.message.reply_text("❌ Budget invalide. Exemple : /modifier_budget 15000")
+        return
+
+    await update.message.reply_text(
+        f"✅ Budget max mis à jour : {_format_valeur_parametre(parametres['budget_max'], ' €')}"
+    )
+
+
+async def voir_budget_commande(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    parametres = obtenir_parametres(_chat_id(update))
+    await update.message.reply_text(
+        f"Budget max : {_format_valeur_parametre(parametres.get('budget_max'), ' €')}"
+    )
+
+
+async def modifier_km_commande(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("❌ Utilisation : /modifier_km 120000")
+        return
+
+    try:
+        parametres = modifier_km_utilisateur(_chat_id(update), context.args[0])
+    except ValueError:
+        await update.message.reply_text("❌ Kilométrage invalide. Exemple : /modifier_km 120000")
+        return
+
+    await update.message.reply_text(
+        f"✅ Kilométrage max mis à jour : {_format_valeur_parametre(parametres['km_max'])}"
+    )
+
+
+async def voir_km_commande(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    parametres = obtenir_parametres(_chat_id(update))
+    await update.message.reply_text(
+        f"Km max : {_format_valeur_parametre(parametres.get('km_max'))}"
+    )
+
+
+async def modifier_annee_commande(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("❌ Utilisation : /modifier_annee 2017")
+        return
+
+    try:
+        annee = int(context.args[0])
+        if annee < 1950 or annee > datetime.now().year + 1:
+            raise ValueError
+        parametres = modifier_annee_utilisateur(_chat_id(update), annee)
+    except ValueError:
+        await update.message.reply_text("❌ Année invalide. Exemple : /modifier_annee 2017")
+        return
+
+    await update.message.reply_text(
+        f"✅ Année minimale mise à jour : {parametres['annee_min']}"
+    )
+
+
+async def voir_annee_commande(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    parametres = obtenir_parametres(_chat_id(update))
+    await update.message.reply_text(
+        f"Année min : {_format_valeur_parametre(parametres.get('annee_min'))}"
+    )
+
+
+async def mes_alertes_commande(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    alertes = lister_alertes_utilisateur(_chat_id(update))
+
+    if not alertes:
+        await update.message.reply_text("Aucune alerte active.")
+        return
+
+    lignes = ["🔔 MES ALERTES", ""]
+    lignes.extend(
+        f"{alerte.get('id')}. {alerte.get('texte') or 'Alerte'}"
+        for alerte in alertes
+    )
+    await update.message.reply_text("\n".join(lignes))
+
+
+async def supprimer_alerte_commande(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("❌ Utilisation : /supprimer_alerte 3")
+        return
+
+    try:
+        supprimee = supprimer_alerte_utilisateur(_chat_id(update), context.args[0])
+    except ValueError:
+        await update.message.reply_text("❌ ID d'alerte invalide. Exemple : /supprimer_alerte 3")
+        return
+
+    if supprimee:
+        await update.message.reply_text("✅ Alerte supprimée.")
+    else:
+        await update.message.reply_text("Aucune alerte trouvée avec cet ID.")
+
+
+async def supprimer_toutes_alertes_commande(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    total = supprimer_toutes_alertes(_chat_id(update))
+    await update.message.reply_text(f"✅ {total} alerte(s) supprimée(s).")
+
+
+async def mes_parametres_commande(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(formater_parametres_utilisateur(_chat_id(update)))
+
+
 async def analyser(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) == 0:
         await update.message.reply_text(
@@ -3166,6 +3324,19 @@ def main():
     app.add_handler(CommandHandler("dashboard", dashboard))
     app.add_handler(CommandHandler("top", top))
     app.add_handler(CommandHandler("stats_modele", stats_modele_commande))
+    app.add_handler(CommandHandler("modifier_budget", modifier_budget_commande))
+    app.add_handler(CommandHandler("voir_budget", voir_budget_commande))
+    app.add_handler(CommandHandler("modifier_km", modifier_km_commande))
+    app.add_handler(CommandHandler("voir_km", voir_km_commande))
+    app.add_handler(CommandHandler("modifier_annee", modifier_annee_commande))
+    app.add_handler(CommandHandler("voir_annee", voir_annee_commande))
+    app.add_handler(CommandHandler("mes_alertes", mes_alertes_commande))
+    app.add_handler(CommandHandler("supprimer_alerte", supprimer_alerte_commande))
+    app.add_handler(CommandHandler(
+        "supprimer_toutes_les_alertes",
+        supprimer_toutes_alertes_commande
+    ))
+    app.add_handler(CommandHandler("mes_parametres", mes_parametres_commande))
     app.add_handler(CommandHandler("analyser", analyser))
     app.add_handler(CommandHandler("historique", historique))
     app.add_handler(CommandHandler("scanner_global", scanner_global))
