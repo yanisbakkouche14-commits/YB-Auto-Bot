@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote_plus, urlparse
@@ -107,35 +108,243 @@ def _nombre(texte):
     return int(valeur) if valeur else "Inconnu"
 
 
-def _prix(texte):
-    match = re.search(
-        r"(\d{1,3}(?:[\s\.\u00a0]\d{3})+|\d{3,6})\s*(?:€|eur|â‚¬)|"
-        r"(?:€|eur|â‚¬)\s*(\d{1,3}(?:[\s\.\u00a0]\d{3})+|\d{3,6})",
-        texte or "",
-        re.IGNORECASE
+MARQUES_AUTO = (
+    "Volkswagen",
+    "VW",
+    "BMW",
+    "Audi",
+    "Mercedes",
+    "Mercedes-Benz",
+    "Opel",
+    "Peugeot",
+    "Renault",
+    "Ford",
+    "Toyota",
+    "Seat",
+    "Skoda",
+    "Citroen",
+    "Citroën",
+    "Hyundai",
+    "Kia",
+    "Volvo",
+    "Fiat",
+    "Nissan",
+    "Mazda",
+    "Honda",
+    "Suzuki",
+    "Mini",
+    "Dacia",
+    "Jeep",
+    "Alfa Romeo",
+    "Porsche",
+    "Mitsubishi",
+    "Chevrolet",
+)
+
+REGIONS_BELGES = {"WAL", "VLG", "BRU"}
+
+
+def _normaliser_texte(texte):
+    texte = str(texte or "")
+    texte = texte.replace("\u00a0", " ")
+    texte = re.sub(r"[ \t]+", " ", texte)
+    texte = re.sub(r"\n{3,}", "\n\n", texte)
+    return texte.strip()
+
+
+def _lignes(texte):
+    lignes = []
+
+    for ligne in re.split(r"\n|\r|\s{2,}", _normaliser_texte(texte)):
+        ligne = ligne.strip(" -•|")
+
+        if ligne:
+            lignes.append(ligne)
+
+    return lignes
+
+
+def _nombre_francais(valeur):
+    chiffres = re.sub(r"[^\d]", "", str(valeur or ""))
+    return int(chiffres) if chiffres else None
+
+
+def _est_ville_ligne(ligne):
+    ligne = _normaliser_texte(ligne)
+
+    if not ligne:
+        return False
+
+    if ligne.lower() in {"belgique", "belgium"}:
+        return True
+
+    match = re.match(r"^[A-Za-zÀ-ÿ' .-]{2,40},\s*([A-Z]{3})$", ligne)
+    return bool(match and match.group(1) in REGIONS_BELGES)
+
+
+def _ville_depuis_ligne(ligne):
+    ligne = _normaliser_texte(ligne)
+
+    if ligne.lower() in {"belgique", "belgium"}:
+        return "Belgique"
+
+    match = re.match(r"^([A-Za-zÀ-ÿ' .-]{2,40}),\s*([A-Z]{3})$", ligne)
+
+    if match and match.group(2) in REGIONS_BELGES:
+        return match.group(1).strip()
+
+    return None
+
+
+def _contient_marque(ligne):
+    ligne_min = ligne.lower()
+    return any(re.search(rf"\b{re.escape(marque.lower())}\b", ligne_min) for marque in MARQUES_AUTO)
+
+
+def _ligne_prix(ligne):
+    ligne_min = ligne.lower()
+    return "\u20ac" in ligne or "eur" in ligne_min or "gratuit" in ligne_min
+
+
+def _ligne_km(ligne):
+    return bool(re.search(r"\bkm\b|kilom", ligne, re.IGNORECASE))
+
+
+def _prix_detail(texte):
+    texte = _normaliser_texte(texte)
+
+    if re.search(r"\bgratuit\b", texte, re.IGNORECASE):
+        return 0, "mot gratuit detecte"
+
+    candidats = []
+    motif = re.compile(
+        r"(?P<avant>(?:€|\u20ac|eur)\s*)?"
+        r"(?P<nombre>\d{1,3}(?:[\s\.\u00a0]\d{3})+|\d{3,6})"
+        r"(?P<apres>\s*(?:€|\u20ac|eur))?",
+        re.IGNORECASE,
     )
 
-    if not match:
-        return "Inconnu"
+    for index_ligne, ligne in enumerate(_lignes(texte)):
+        if _ligne_km(ligne):
+            continue
 
-    return _nombre(match.group(1) or match.group(2))
+        for match in motif.finditer(ligne):
+            if not (match.group("avant") or match.group("apres")):
+                continue
+
+            valeur = _nombre_francais(match.group("nombre"))
+
+            if valeur is None or not 100 <= valeur <= 250000:
+                continue
+
+            candidats.append({
+                "valeur": valeur,
+                "ligne": ligne,
+                "index_ligne": index_ligne,
+                "position": match.start(),
+                "score": 100 - min(index_ligne, 20),
+            })
+
+    if not candidats:
+        return "Inconnu", "aucun prix plausible avec devise"
+
+    choisi = sorted(
+        candidats,
+        key=lambda item: (item["score"], -item["position"]),
+        reverse=True,
+    )[0]
+
+    return choisi["valeur"], f"prix avec devise dans ligne: {choisi['ligne'][:80]}"
+
+
+def _prix(texte):
+    prix, _raison = _prix_detail(texte)
+    return prix
+
+
+def _annee_detail(texte):
+    annee_max = datetime.now().year + 1
+    candidats = []
+
+    for index_ligne, ligne in enumerate(_lignes(texte)):
+        if _ligne_prix(ligne) or _ligne_km(ligne):
+            continue
+
+        for match in re.finditer(r"\b(19[8-9]\d|20\d{2})\b", ligne):
+            valeur = int(match.group(1))
+
+            if 1980 <= valeur <= annee_max:
+                candidats.append({
+                    "valeur": valeur,
+                    "ligne": ligne,
+                    "score": 80 + (10 if _contient_marque(ligne) else 0),
+                })
+
+    if not candidats:
+        return "Inconnu", "aucune annee plausible"
+
+    choisi = sorted(candidats, key=lambda item: item["score"], reverse=True)[0]
+    return choisi["valeur"], f"annee plausible dans ligne: {choisi['ligne'][:80]}"
 
 
 def _annee(texte):
-    match = re.search(r"\b(19|20)\d{2}\b", texte or "")
-    return match.group(0) if match else "Inconnu"
+    annee, _raison = _annee_detail(texte)
+    return annee
+
+
+def _kilometrage_detail(texte):
+    candidats = []
+    motif = re.compile(
+        r"(?<!\d)(?P<nombre>\d{1,3}(?:[\s\.\u00a0]\d{3})+|\d{4,6}|\d{1,3}\s*k)"
+        r"\s*(?P<unite>km|kilom[eè]tres?)?",
+        re.IGNORECASE,
+    )
+
+    for index_ligne, ligne in enumerate(_lignes(texte)):
+        if _ligne_prix(ligne):
+            continue
+
+        for match in motif.finditer(ligne):
+            brut = match.group("nombre")
+            unite = match.group("unite")
+            contient_k = bool(re.search(r"k\s*$", brut, re.IGNORECASE))
+
+            if not unite and not contient_k:
+                continue
+
+            if contient_k:
+                valeur = int(re.sub(r"\D", "", brut)) * 1000
+            else:
+                valeur = _nombre_francais(brut)
+
+            if valeur is None or not 0 <= valeur <= 1000000:
+                continue
+
+            candidats.append({
+                "valeur": valeur,
+                "ligne": ligne,
+                "score": 100 - min(index_ligne, 20),
+            })
+
+    if not candidats:
+        return "Inconnu", "aucun kilometrage plausible"
+
+    choisi = sorted(candidats, key=lambda item: item["score"], reverse=True)[0]
+    return choisi["valeur"], f"kilometrage dans ligne: {choisi['ligne'][:80]}"
 
 
 def _kilometrage(texte):
-    match = re.search(
-        r"(?<!\d)(\d{1,3}(?:[\s\.\u00a0]\d{3})+|\d{4,6})\s*km",
-        texte or "",
-        re.IGNORECASE
-    )
-    return _nombre(match.group(1)) if match else "Inconnu"
+    kilometrage, _raison = _kilometrage_detail(texte)
+    return kilometrage
 
 
 def _ville(texte):
+    for ligne in _lignes(texte):
+        ville = _ville_depuis_ligne(ligne)
+
+        if ville:
+            return ville
+
     villes = (
         "Bruxelles",
         "Charleroi",
@@ -157,17 +366,194 @@ def _ville(texte):
 
 
 def _titre(texte, modele):
-    lignes = [
-        ligne.strip()
-        for ligne in re.split(r"\n|\r|\s{2,}", texte or "")
-        if ligne.strip()
-    ]
+    titre, _incomplet, _raison = _titre_detail(texte, modele)
+    return titre
+
+
+def _titre_detail(texte, modele):
+    lignes = _lignes(texte)
+    candidats = []
+
+    for index, ligne in enumerate(lignes):
+        if len(ligne) < 4:
+            continue
+
+        if _ligne_prix(ligne) or _ligne_km(ligne) or _est_ville_ligne(ligne):
+            continue
+
+        score = 10
+
+        if _contient_marque(ligne):
+            score += 80
+
+        for mot in re.findall(r"[A-Za-z0-9]+", modele or ""):
+            if len(mot) > 2 and mot.lower() in ligne.lower():
+                score += 10
+
+        if re.search(r"\b(gti|gtd|tdi|tsi|hdi|dci|hybrid|automatique|manual|pack|amg|m sport)\b", ligne, re.IGNORECASE):
+            score += 15
+
+        score -= index
+        candidats.append({"ligne": ligne, "score": score})
+
+    if candidats:
+        choisi = sorted(candidats, key=lambda item: item["score"], reverse=True)[0]
+        return choisi["ligne"][:120], False, f"ligne titre score={choisi['score']}"
 
     for ligne in lignes:
-        if "€" not in ligne and "eur" not in ligne.lower() and len(ligne) > 4:
-            return ligne[:120]
+        if not _ligne_prix(ligne) and not _ligne_km(ligne):
+            return ligne[:120], True, "fallback meilleure ligne sans prix/km"
 
-    return modele
+    return modele, True, "fallback modele recherche"
+
+
+def _score_texte_carte(texte, modele):
+    score = 0
+
+    if _prix(texte) != "Inconnu":
+        score += 40
+
+    if _kilometrage(texte) != "Inconnu":
+        score += 25
+
+    if _annee(texte) != "Inconnu":
+        score += 20
+
+    titre, incomplet, _raison = _titre_detail(texte, modele)
+
+    if titre and not incomplet:
+        score += 35
+
+    if _ville(texte) != "Belgique":
+        score += 10
+
+    longueur = len(_normaliser_texte(texte))
+
+    if 20 <= longueur <= 1200:
+        score += 10
+
+    return score
+
+
+def _texte_locator(locator, timeout=1000):
+    try:
+        return locator.inner_text(timeout=timeout)
+    except Exception:
+        return ""
+
+
+def _attribut_locator(locator, nom):
+    try:
+        return locator.get_attribute(nom) or ""
+    except Exception:
+        return ""
+
+
+def _donnees_carte(element, modele):
+    candidats = []
+
+    try:
+        donnees = element.evaluate(
+            """(node) => {
+                const pick = (el) => {
+                    if (!el) return null;
+                    const texts = [];
+                    el.querySelectorAll('*').forEach((child) => {
+                        const style = window.getComputedStyle(child);
+                        const visible = style && style.display !== 'none' &&
+                            style.visibility !== 'hidden' &&
+                            child.offsetParent !== null;
+                        const text = (child.innerText || child.textContent || '').trim();
+                        if (visible && text) texts.push(text);
+                    });
+                    return {
+                        inner_text: (el.innerText || el.textContent || '').trim(),
+                        aria_label: el.getAttribute('aria-label') || '',
+                        title: el.getAttribute('title') || '',
+                        textes_enfants: texts.slice(0, 80),
+                    };
+                };
+                const out = [];
+                let current = node;
+                for (let depth = 0; current && depth <= 6; depth++) {
+                    out.push({depth, data: pick(current)});
+                    current = current.parentElement;
+                }
+                return out;
+            }"""
+        )
+    except Exception:
+        donnees = []
+
+    lien_texte = _texte_locator(element)
+    lien_aria = _attribut_locator(element, "aria-label")
+    lien_title = _attribut_locator(element, "title")
+    textes_lien = [lien_texte, lien_aria, lien_title]
+
+    for entree in donnees:
+        data = entree.get("data") or {}
+        morceaux = [
+            data.get("inner_text", ""),
+            data.get("aria_label", ""),
+            data.get("title", ""),
+            "\n".join(data.get("textes_enfants") or []),
+            "\n".join(textes_lien),
+        ]
+        texte = _normaliser_texte("\n".join(morceau for morceau in morceaux if morceau))
+
+        if not texte:
+            continue
+
+        candidats.append({
+            "depth": entree.get("depth", 0),
+            "texte": texte,
+            "score": _score_texte_carte(texte, modele),
+        })
+
+    if not candidats:
+        texte = _normaliser_texte("\n".join(textes_lien))
+        candidats.append({"depth": 0, "texte": texte, "score": _score_texte_carte(texte, modele)})
+
+    choisi = sorted(
+        candidats,
+        key=lambda item: (item["score"], -item["depth"]),
+        reverse=True,
+    )[0]
+
+    return {
+        "texte": choisi["texte"],
+        "depth": choisi["depth"],
+        "score_conteneur": choisi["score"],
+        "candidats": candidats,
+        "aria_label": lien_aria,
+        "title": lien_title,
+        "texte_lien": lien_texte,
+    }
+
+
+def _annonce_depuis_texte(texte, modele, lien):
+    prix, raison_prix = _prix_detail(texte)
+    annee, raison_annee = _annee_detail(texte)
+    kilometrage, raison_km = _kilometrage_detail(texte)
+    titre, titre_incomplet, raison_titre = _titre_detail(texte, modele)
+    ville = _ville(texte)
+
+    return {
+        "titre": titre,
+        "prix": prix,
+        "annee": annee,
+        "kilometrage": kilometrage,
+        "ville": ville,
+        "lien": lien,
+        "titre_incomplet": titre_incomplet,
+        "_debug": {
+            "raison_prix": raison_prix,
+            "raison_annee": raison_annee,
+            "raison_kilometrage": raison_km,
+            "raison_titre": raison_titre,
+            "texte_normalise": _normaliser_texte(texte)[:1000],
+        },
+    }
 
 
 def _import_playwright():
@@ -490,6 +876,68 @@ def ouvrir_connexion_manuelle():
         contexte.close()
 
 
+def _extraire_cartes_page(page, modele, limite=MAX_ANNONCES, debug=False):
+    liens = page.locator("a[href*='/marketplace/item/']")
+    nombre_cartes = liens.count()
+    annonces = []
+    debug_cartes = []
+    liens_vus = set()
+    limite = max(1, min(int(limite or MAX_ANNONCES), MAX_ANNONCES))
+
+    for index in range(min(nombre_cartes, limite * 3)):
+        element = liens.nth(index)
+        href = element.get_attribute("href") or ""
+
+        if not href:
+            continue
+
+        lien = href if href.startswith("http") else f"{BASE_URL}{href}"
+
+        if lien in liens_vus:
+            continue
+
+        donnees_carte = _donnees_carte(element, modele)
+        texte = donnees_carte["texte"]
+
+        if len(texte.strip()) < 8:
+            continue
+
+        liens_vus.add(lien)
+        annonce = _annonce_depuis_texte(texte, modele, lien)
+        annonce["score_conteneur"] = donnees_carte["score_conteneur"]
+
+        if debug and len(debug_cartes) < 3:
+            debug_cartes.append({
+                "index": index,
+                "href": lien,
+                "texte_brut_normalise": annonce["_debug"]["texte_normalise"],
+                "titre_choisi": annonce["titre"],
+                "prix_choisi": annonce["prix"],
+                "annee_choisie": annonce["annee"],
+                "kilometrage_choisi": annonce["kilometrage"],
+                "ville_choisie": annonce["ville"],
+                "titre_incomplet": annonce["titre_incomplet"],
+                "score_conteneur": annonce["score_conteneur"],
+                "raisons": {
+                    "titre": annonce["_debug"]["raison_titre"],
+                    "prix": annonce["_debug"]["raison_prix"],
+                    "annee": annonce["_debug"]["raison_annee"],
+                    "kilometrage": annonce["_debug"]["raison_kilometrage"],
+                },
+            })
+
+        annonces.append({
+            cle: valeur
+            for cle, valeur in annonce.items()
+            if cle != "_debug"
+        })
+
+        if len(annonces) >= limite:
+            break
+
+    return nombre_cartes, annonces, debug_cartes
+
+
 def rechercher_marketplace(modele, limite=MAX_ANNONCES):
     etape = "lancement Playwright"
     sync_playwright = _import_playwright()
@@ -529,43 +977,15 @@ def rechercher_marketplace(modele, limite=MAX_ANNONCES):
 
             page.wait_for_timeout(1500)
             etape = "extraction"
-            liens = page.locator("a[href*='/marketplace/item/']")
-            nombre_cartes = liens.count()
+            nombre_cartes, annonces, _debug_cartes = _extraire_cartes_page(
+                page,
+                modele,
+                limite=limite,
+                debug=False,
+            )
             diagnostic = _diagnostic_page(page, etape, nombre_cartes=nombre_cartes)
             diagnostic["location_id_utilise"] = _marketplace_location_id() or None
             diagnostic["url_construite"] = url
-            annonces = []
-            liens_vus = set()
-
-            for index in range(min(nombre_cartes, limite * 2)):
-                element = liens.nth(index)
-                href = element.get_attribute("href") or ""
-
-                if not href:
-                    continue
-
-                lien = href if href.startswith("http") else f"{BASE_URL}{href}"
-
-                if lien in liens_vus:
-                    continue
-
-                texte = element.inner_text(timeout=2000)
-
-                if len(texte.strip()) < 8:
-                    continue
-
-                liens_vus.add(lien)
-                annonces.append({
-                    "titre": _titre(texte, modele),
-                    "prix": _prix(texte),
-                    "annee": _annee(texte),
-                    "kilometrage": _kilometrage(texte),
-                    "ville": _ville(texte),
-                    "lien": lien,
-                })
-
-                if len(annonces) >= limite:
-                    break
 
             logger.info(
                 "Marketplace local extraction terminee: cartes=%s annonces=%s",
@@ -590,6 +1010,56 @@ def rechercher_marketplace(modele, limite=MAX_ANNONCES):
             etape,
             diagnostic,
         ) from exc
+    finally:
+        if contexte is not None:
+            try:
+                contexte.close()
+            except Exception:
+                logger.warning("Impossible de fermer le contexte Playwright proprement.")
+
+
+def debug_recherche_marketplace(modele):
+    sync_playwright = _import_playwright()
+    url = _url_recherche(modele)
+    contexte = None
+
+    try:
+        with sync_playwright() as playwright:
+            if not _profil_existe():
+                raise MarketplaceLocalError(
+                    "PROFILE_MISSING",
+                    "Profil Facebook local absent : lance d'abord le mode --login.",
+                    "chargement du profil",
+                    {
+                        "profile_dir": str(_profile_dir()),
+                        "variable": ENV_PROFILE_DIR,
+                    },
+                )
+
+            contexte = playwright.chromium.launch_persistent_context(
+                **_options_contexte()
+            )
+            page = contexte.new_page()
+            page.goto(url, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
+            _detecter_blocage(page, "debug recherche")
+            page.wait_for_timeout(1500)
+            nombre_cartes, annonces, debug_cartes = _extraire_cartes_page(
+                page,
+                modele,
+                limite=3,
+                debug=True,
+            )
+            diagnostic = _diagnostic_page(page, "debug extraction", nombre_cartes)
+            diagnostic["location_id_utilise"] = _marketplace_location_id() or None
+            diagnostic["url_construite"] = url
+
+            return {
+                "ok": True,
+                "modele": modele,
+                "diagnostic": diagnostic,
+                "nombre_annonces_normalisees": len(annonces),
+                "cartes_debug": debug_cartes,
+            }
     finally:
         if contexte is not None:
             try:
@@ -677,6 +1147,11 @@ def main():
     parser = argparse.ArgumentParser(description="Service local Facebook Marketplace")
     parser.add_argument("--login", action="store_true", help="ouvre une session Facebook manuelle")
     parser.add_argument("--health", action="store_true", help="affiche un diagnostic local non sensible")
+    parser.add_argument(
+        "--debug-search",
+        metavar="MODELE",
+        help="inspecte 3 cartes Marketplace sans afficher de donnees sensibles",
+    )
     parser.add_argument("--host", default=DEFAULT_HOST)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     args = parser.parse_args()
@@ -685,6 +1160,14 @@ def main():
 
     if args.health:
         print(json.dumps(diagnostic_local(), ensure_ascii=False, indent=2))
+        return
+
+    if args.debug_search:
+        print(json.dumps(
+            debug_recherche_marketplace(args.debug_search),
+            ensure_ascii=False,
+            indent=2,
+        ))
         return
 
     if args.login:
