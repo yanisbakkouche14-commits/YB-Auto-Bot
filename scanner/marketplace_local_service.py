@@ -17,6 +17,7 @@ DEFAULT_PROFILE_DIR = "local_facebook_profile"
 ENV_PROFILE_DIR = "MARKETPLACE_PROFILE_DIR"
 ENV_BROWSER_EXECUTABLE = "MARKETPLACE_BROWSER_EXECUTABLE"
 ENV_HEADLESS = "MARKETPLACE_HEADLESS"
+ENV_LOCATION_ID = "MARKETPLACE_LOCATION_ID"
 
 logger = logging.getLogger("marketplace_local_service")
 
@@ -45,6 +46,23 @@ def _browser_executable():
 
 def _headless():
     return os.getenv(ENV_HEADLESS, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _marketplace_location_id():
+    return os.getenv(ENV_LOCATION_ID, "").strip().strip("/")
+
+
+def _marketplace_base_url():
+    location_id = _marketplace_location_id()
+
+    if location_id:
+        return f"{BASE_URL}/marketplace/{location_id}"
+
+    return f"{BASE_URL}/marketplace"
+
+
+def _url_recherche(modele):
+    return f"{_marketplace_base_url()}/search/?query={quote_plus(modele)}&exact=false"
 
 
 def _systeme():
@@ -189,6 +207,8 @@ def _options_contexte(headless=None):
 def _diagnostic_page(page, etape, nombre_cartes=None):
     diagnostic = {
         "etape": etape,
+        "location_id_utilise": _marketplace_location_id() or None,
+        "url_construite": None,
         "url_finale": "Inconnu",
         "titre_page": "Inconnu",
         "login_detecte": False,
@@ -428,6 +448,8 @@ def diagnostic_local():
         "browser_exists": executable.exists() if executable else None,
         "browser_used": str(executable) if executable else "Playwright default bundled browser",
         "chromium_args": options.get("args", []),
+        "marketplace_location_id": _marketplace_location_id() or None,
+        "marketplace_base_url": _marketplace_base_url(),
         "headless": _headless(),
         "playwright_available": False,
         "errors": [],
@@ -471,7 +493,7 @@ def rechercher_marketplace(modele, limite=MAX_ANNONCES):
     etape = "lancement Playwright"
     sync_playwright = _import_playwright()
     limite = max(1, min(int(limite or MAX_ANNONCES), MAX_ANNONCES))
-    url = f"{BASE_URL}/marketplace/search/?query={quote_plus(modele)}&exact=false"
+    url = _url_recherche(modele)
     contexte = None
 
     try:
@@ -509,6 +531,8 @@ def rechercher_marketplace(modele, limite=MAX_ANNONCES):
             liens = page.locator("a[href*='/marketplace/item/']")
             nombre_cartes = liens.count()
             diagnostic = _diagnostic_page(page, etape, nombre_cartes=nombre_cartes)
+            diagnostic["location_id_utilise"] = _marketplace_location_id() or None
+            diagnostic["url_construite"] = url
             annonces = []
             liens_vus = set()
 
