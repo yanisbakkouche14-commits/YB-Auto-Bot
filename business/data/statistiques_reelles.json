@@ -1,0 +1,97 @@
+{
+  "date_generation": "2026-07-19T16:38:39+00:00",
+  "db": "C:\\Users\\lolob\\YB-AUTO-BOT\\business\\data\\marche_reel.db",
+  "methodologie": {
+    "vente_reelle_estimee": "Une annonce est consideree disparue quand elle n'apparait plus lors d'un scan reussi de la meme plateforme et du meme modele.",
+    "marge_moyenne_estimee": "prix median observe - prix premier quartile observe"
+  },
+  "modeles": [
+    {
+      "modele": "Volkswagen Polo",
+      "annonces_total": 58,
+      "annonces_actives": 55,
+      "annonces_disparues": 3,
+      "delai_moyen_vente_reel_jours": 0.01,
+      "prix_moyen": 10781.56,
+      "prix_p25": 4390,
+      "prix_median": 9990,
+      "marge_moyenne_estimee": 5600,
+      "marge_methode": "prix_median_observe - prix_p25_observe",
+      "score_liquidite_reel": 71.6,
+      "score_rentabilite_reel": 100
+    },
+    {
+      "modele": "Volkswagen Golf",
+      "annonces_total": 51,
+      "annonces_actives": 50,
+      "annonces_disparues": 1,
+      "delai_moyen_vente_reel_jours": 0.01,
+      "prix_moyen": 16014.66,
+      "prix_p25": 6950,
+      "prix_median": 12495,
+      "marge_moyenne_estimee": 5545,
+      "marge_methode": "prix_median_observe - prix_p25_observe",
+      "score_liquidite_reel": 70.6,
+      "score_rentabilite_reel": 100
+    },
+    {
+      "modele": "Opel Corsa",
+      "annonces_total": 47,
+      "annonces_actives": 46,
+      "annonces_disparues": 1,
+      "delai_moyen_vente_reel_jours": 0.01,
+      "prix_moyen": 9811.48,
+      "prix_p25": 4000,
+      "prix_median": 7700,
+      "marge_moyenne_estimee": 3700,
+      "marge_methode": "prix_median_observe - prix_p25_observe",
+      "score_liquidite_reel": 70.6,
+      "score_rentabilite_reel": 100
+    }
+  ],
+  "top_20_revente_moins_15_jours": [
+    {
+      "modele": "Volkswagen Polo",
+      "annonces_total": 58,
+      "annonces_actives": 55,
+      "annonces_disparues": 3,
+      "delai_moyen_vente_reel_jours": 0.01,
+      "prix_moyen": 10781.56,
+      "prix_p25": 4390,
+      "prix_median": 9990,
+      "marge_moyenne_estimee": 5600,
+      "marge_methode": "prix_median_observe - prix_p25_observe",
+      "score_liquidite_reel": 71.6,
+      "score_rentabilite_reel": 100
+    },
+    {
+      "modele": "Volkswagen Golf",
+      "annonces_total": 51,
+      "annonces_actives": 50,
+      "annonces_disparues": 1,
+      "delai_moyen_vente_reel_jours": 0.01,
+      "prix_moyen": 16014.66,
+      "prix_p25": 6950,
+      "prix_median": 12495,
+      "marge_moyenne_estimee": 5545,
+      "marge_methode": "prix_median_observe - prix_p25_observe",
+      "score_liquidite_reel": 70.6,
+      "score_rentabilite_reel": 100
+    },
+    {
+      "modele": "Opel Corsa",
+      "annonces_total": 47,
+      "annonces_actives": 46,
+      "annonces_disparues": 1,
+      "delai_moyen_vente_reel_jours": 0.01,
+      "prix_moyen": 9811.48,
+      "prix_p25": 4000,
+      "prix_median": 7700,
+      "marge_moyenne_estimee": 3700,
+      "marge_methode": "prix_median_observe - prix_p25_observe",
+      "score_liquidite_reel": 70.6,
+      "score_rentabilite_reel": 100
+    }
+  ],
+  "top_20_plus_60_jours": []
+}
