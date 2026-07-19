@@ -3,7 +3,7 @@ import logging
 import os
 import re
 from datetime import datetime
-from urllib.parse import quote_plus, urljoin
+from urllib.parse import quote_plus, urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -136,21 +136,89 @@ def _construire_url(modele):
     return f"{SEARCH_URL}?query={quote_plus(modele)}&exact=false"
 
 
+def _valeur_renseignee(valeur):
+    if valeur is None:
+        return False
+
+    texte = str(valeur).strip()
+
+    return bool(texte) and texte.lower() not in {
+        "inconnu",
+        "inconnue",
+        "non renseigne",
+        "non renseigné",
+        "n/a",
+        "none",
+    }
+
+
+def _normaliser_champ(valeur, remplacement):
+    return valeur if _valeur_renseignee(valeur) else remplacement
+
+
+def _lien_valide(lien):
+    if not lien:
+        return False
+
+    try:
+        resultat = urlparse(str(lien).strip())
+    except ValueError:
+        return False
+
+    return resultat.scheme in {"http", "https"} and bool(resultat.netloc)
+
+
+def _titre_ressemble_ville(titre, ville):
+    titre_normalise = re.sub(r"\s+", " ", str(titre or "").strip()).lower()
+    ville_normalisee = re.sub(r"\s+", " ", str(ville or "").strip()).lower()
+
+    villes_connues = {
+        "anderlecht",
+        "anvers",
+        "antwerpen",
+        "bruges",
+        "bruxelles",
+        "brussels",
+        "charleroi",
+        "gand",
+        "gent",
+        "liege",
+        "liège",
+        "louvain",
+        "mons",
+        "namur",
+        "tournai",
+        "wavre",
+    }
+
+    if not titre_normalise:
+        return False
+
+    return (
+        titre_normalise == ville_normalisee
+        or titre_normalise in villes_connues
+    )
+
+
 def _annonce_service_local(annonce, modele):
-    ville = annonce.get("ville") or "Belgique"
-    titre = annonce.get("titre") or modele
+    ville = _normaliser_champ(annonce.get("ville"), "Non renseigné")
+    titre = str(annonce.get("titre") or "").strip()
 
     return {
         "source": "Facebook Marketplace",
         "pays": "Belgique",
         "modele": titre,
         "titre": titre,
-        "prix": annonce.get("prix", "Inconnu"),
-        "kilometrage": annonce.get("kilometrage", "Inconnu"),
-        "annee": annonce.get("annee", "Inconnu"),
+        "prix": _normaliser_champ(annonce.get("prix"), "Non renseigné"),
+        "kilometrage": _normaliser_champ(
+            annonce.get("kilometrage"),
+            "Non renseigné"
+        ),
+        "annee": _normaliser_champ(annonce.get("annee"), "Non renseignée"),
         "ville": ville,
         "localisation": ville,
-        "lien": annonce.get("lien", ""),
+        "lien": str(annonce.get("lien") or "").strip(),
+        "titre_incomplet": _titre_ressemble_ville(titre, ville),
     }
 
 
@@ -173,7 +241,9 @@ def _rechercher_service_local(modele):
             timeout=LOCAL_SERVICE_TIMEOUT
         )
         logger.info(
-            "Facebook Marketplace service local: code_http=%s taille_reponse=%s",
+            "Facebook Marketplace service local: url=%s code_http=%s "
+            "taille_reponse=%s",
+            reponse.url,
             reponse.status_code,
             len(reponse.text or "")
         )
@@ -203,13 +273,34 @@ def _rechercher_service_local(modele):
 
         raise MarketplaceIndisponible(erreur)
 
-    annonces = [
-        _annonce_service_local(annonce, modele)
-        for annonce in donnees.get("annonces", [])[:MAX_ANNONCES]
-        if annonce.get("lien")
-    ]
+    annonces_recues = donnees.get("annonces", [])[:MAX_ANNONCES]
+    annonces = []
+    rejets = []
+
+    for index, annonce in enumerate(annonces_recues, start=1):
+        normalisee = _annonce_service_local(annonce, modele)
+
+        if not _lien_valide(normalisee["lien"]):
+            rejets.append((index, "lien absent ou invalide"))
+            continue
+
+        if not normalisee["titre"]:
+            rejets.append((index, "titre vide"))
+            continue
+
+        annonces.append(normalisee)
+
+    for index, raison in rejets:
+        logger.info(
+            "Facebook Marketplace service local: annonce_rejetee=%s raison=%s",
+            index,
+            raison
+        )
+
     logger.info(
-        "Facebook Marketplace service local: annonces=%s",
+        "Facebook Marketplace service local: recues=%s rejetees=%s finales=%s",
+        len(annonces_recues),
+        len(rejets),
         len(annonces)
     )
     return annonces
@@ -506,6 +597,10 @@ def rechercher_voitures(modele, ignorer_desactivation=False):
             _enregistrer_echec(erreur)
             return []
         except MarketplaceIndisponible as erreur:
+            logger.warning(
+                "Facebook Marketplace service local indisponible: %s",
+                erreur
+            )
             _enregistrer_echec(erreur)
             return []
 
@@ -538,6 +633,7 @@ def rechercher_voitures(modele, ignorer_desactivation=False):
         _enregistrer_echec(erreur)
         return []
     except MarketplaceIndisponible as erreur:
+        logger.warning("Facebook Marketplace indisponible: %s", erreur)
         _enregistrer_echec(erreur)
         return []
 
