@@ -1,7 +1,10 @@
+import argparse
 import json
 import logging
 import os
 import re
+import sys
+import traceback
 from datetime import datetime
 from urllib.parse import quote_plus, urljoin, urlparse
 
@@ -20,6 +23,8 @@ LOCAL_SERVICE_TOKEN = os.getenv("MARKETPLACE_LOCAL_TOKEN", "").strip()
 LOCAL_SERVICE_TIMEOUT = 12
 
 logger = logging.getLogger(__name__)
+
+_DERNIER_DIAGNOSTIC_LOCAL = None
 
 _ETAT = {
     "actif": True,
@@ -47,6 +52,116 @@ class MarketplaceIndisponible(RuntimeError):
 
 class MarketplaceAuthentificationRequise(MarketplaceIndisponible):
     pass
+
+
+def _diagnostic_vide():
+    return {
+        "local_url_definie": bool(LOCAL_SERVICE_URL),
+        "local_token_defini": bool(LOCAL_SERVICE_TOKEN),
+        "authorization_header_present": False,
+        "authorization_header_format": None,
+        "authorization_header_final_present": None,
+        "authorization_header_final_format": None,
+        "url_appelee": None,
+        "url_finale": None,
+        "historique_redirections": [],
+        "code_http": None,
+        "ok_recu": None,
+        "annonces_brut_nombre": None,
+        "annonces_type": None,
+        "annonces_normalisees": 0,
+        "annonces_rejetees": 0,
+        "raisons_rejet": [],
+        "nombre_final_retourne": 0,
+        "erreur": None,
+        "traceback": None,
+    }
+
+
+def _historique_redirections(reponse):
+    return [
+        {
+            "code_http": etape.status_code,
+            "url": etape.url,
+        }
+        for etape in getattr(reponse, "history", [])
+    ]
+
+
+def _apercu_reponse(reponse):
+    texte = getattr(reponse, "text", "") or ""
+    return texte[:300].replace("\n", " ").replace("\r", " ")
+
+
+def _logger_diagnostic_local(diagnostic):
+    global _DERNIER_DIAGNOSTIC_LOCAL
+
+    _DERNIER_DIAGNOSTIC_LOCAL = dict(diagnostic)
+    logger.info(
+        "Facebook Marketplace diagnostic local: local_url_definie=%s "
+        "token_present=%s authorization_header_present=%s "
+        "authorization_header_format=%s authorization_header_final_present=%s "
+        "authorization_header_final_format=%s url_appelee=%s code_http=%s "
+        "url_finale=%s redirections=%s ok_recu=%s annonces_brut=%s "
+        "annonces_type=%s rejetees=%s finales=%s",
+        diagnostic["local_url_definie"],
+        diagnostic["local_token_defini"],
+        diagnostic["authorization_header_present"],
+        diagnostic["authorization_header_format"],
+        diagnostic["authorization_header_final_present"],
+        diagnostic["authorization_header_final_format"],
+        diagnostic["url_appelee"],
+        diagnostic["code_http"],
+        diagnostic["url_finale"],
+        diagnostic["historique_redirections"],
+        diagnostic["ok_recu"],
+        diagnostic["annonces_brut_nombre"],
+        diagnostic["annonces_type"],
+        diagnostic["annonces_rejetees"],
+        diagnostic["nombre_final_retourne"],
+    )
+
+
+def _erreur_diagnostic(diagnostic, code, erreur, reponse=None):
+    global _DERNIER_DIAGNOSTIC_LOCAL
+
+    diagnostic["erreur"] = {
+        "code": code,
+        "type": type(erreur).__name__,
+        "message": str(erreur),
+    }
+    exception_active = sys.exc_info()[0] is not None
+    diagnostic["traceback"] = (
+        traceback.format_exc()
+        if exception_active
+        else "".join(traceback.format_stack(limit=8))
+    )
+
+    if reponse is not None:
+        diagnostic["code_http"] = getattr(reponse, "status_code", None)
+        diagnostic["url_finale"] = getattr(reponse, "url", None)
+        diagnostic["historique_redirections"] = _historique_redirections(reponse)
+        diagnostic["apercu_reponse"] = _apercu_reponse(reponse)
+
+    message_log = (
+        "Facebook Marketplace service local erreur: code=%s type=%s message=%s "
+        "url_appelee=%s code_http=%s url_finale=%s apercu_reponse=%s"
+    )
+    arguments_log = (
+        code,
+        type(erreur).__name__,
+        erreur,
+        diagnostic["url_appelee"],
+        diagnostic["code_http"],
+        diagnostic["url_finale"],
+        diagnostic.get("apercu_reponse"),
+    )
+
+    if exception_active:
+        logger.exception(message_log, *arguments_log)
+    else:
+        logger.error(message_log, *arguments_log)
+    _DERNIER_DIAGNOSTIC_LOCAL = dict(diagnostic)
 
 
 def _maintenant():
@@ -222,16 +337,23 @@ def _annonce_service_local(annonce, modele):
     }
 
 
-def _rechercher_service_local(modele):
+def _rechercher_service_local_avec_diagnostic(modele):
+    diagnostic = _diagnostic_vide()
+
     if not LOCAL_SERVICE_URL:
-        return None
+        _logger_diagnostic_local(diagnostic)
+        return None, diagnostic
 
     headers = {}
 
     if LOCAL_SERVICE_TOKEN:
         headers["Authorization"] = f"Bearer {LOCAL_SERVICE_TOKEN}"
+        diagnostic["authorization_header_present"] = True
+        diagnostic["authorization_header_format"] = "Bearer <token>"
 
     url = f"{LOCAL_SERVICE_URL}/marketplace"
+    diagnostic["url_appelee"] = url
+    reponse = None
 
     try:
         reponse = requests.get(
@@ -240,6 +362,20 @@ def _rechercher_service_local(modele):
             headers=headers,
             timeout=LOCAL_SERVICE_TIMEOUT
         )
+        diagnostic["code_http"] = reponse.status_code
+        diagnostic["url_finale"] = reponse.url
+        diagnostic["historique_redirections"] = _historique_redirections(reponse)
+        authorization_final = getattr(
+            getattr(reponse, "request", None),
+            "headers",
+            {},
+        ).get("Authorization")
+        diagnostic["authorization_header_final_present"] = bool(authorization_final)
+        diagnostic["authorization_header_final_format"] = (
+            "Bearer <token>"
+            if str(authorization_final or "").startswith("Bearer ")
+            else None
+        )
         logger.info(
             "Facebook Marketplace service local: url=%s code_http=%s "
             "taille_reponse=%s",
@@ -247,19 +383,36 @@ def _rechercher_service_local(modele):
             reponse.status_code,
             len(reponse.text or "")
         )
+        if reponse.status_code in {401, 403, 404, 502}:
+            erreur_http = MarketplaceIndisponible(
+                f"service local Marketplace HTTP {reponse.status_code}"
+            )
+            _erreur_diagnostic(
+                diagnostic,
+                f"HTTP_{reponse.status_code}",
+                erreur_http,
+                reponse=reponse,
+            )
+            raise erreur_http
+
         donnees = reponse.json()
     except requests.exceptions.Timeout as erreur:
+        _erreur_diagnostic(diagnostic, "TIMEOUT", erreur)
         raise MarketplaceIndisponible(
             f"service local Marketplace timeout: {erreur}"
         ) from erreur
     except requests.exceptions.RequestException as erreur:
+        _erreur_diagnostic(diagnostic, "REQUEST_ERROR", erreur)
         raise MarketplaceIndisponible(
             f"service local Marketplace indisponible: {erreur}"
         ) from erreur
     except ValueError as erreur:
+        _erreur_diagnostic(diagnostic, "JSON_INVALIDE", erreur, reponse=reponse)
         raise MarketplaceIndisponible(
             "service local Marketplace réponse JSON invalide"
         ) from erreur
+
+    diagnostic["ok_recu"] = donnees.get("ok")
 
     if not donnees.get("ok"):
         erreur = (
@@ -269,15 +422,37 @@ def _rechercher_service_local(modele):
         )
 
         if "session facebook expirée" in erreur.lower():
-            raise MarketplaceAuthentificationRequise(erreur)
+            exception = MarketplaceAuthentificationRequise(erreur)
+            _erreur_diagnostic(diagnostic, "AUTH_REQUISE", exception)
+            raise exception
 
-        raise MarketplaceIndisponible(erreur)
+        exception = MarketplaceIndisponible(erreur)
+        _erreur_diagnostic(diagnostic, "OK_FALSE", exception, reponse=reponse)
+        raise exception
 
-    annonces_recues = donnees.get("annonces", [])[:MAX_ANNONCES]
+    annonces_brutes = donnees.get("annonces", [])
+    diagnostic["annonces_type"] = type(annonces_brutes).__name__
+
+    if annonces_brutes is None:
+        annonces_brutes = []
+
+    if not isinstance(annonces_brutes, list):
+        exception = MarketplaceIndisponible(
+            f"structure inattendue: annonces est {type(annonces_brutes).__name__}"
+        )
+        _erreur_diagnostic(diagnostic, "STRUCTURE_INATTENDUE", exception)
+        raise exception
+
+    diagnostic["annonces_brut_nombre"] = len(annonces_brutes)
+    annonces_recues = annonces_brutes[:MAX_ANNONCES]
     annonces = []
     rejets = []
 
     for index, annonce in enumerate(annonces_recues, start=1):
+        if not isinstance(annonce, dict):
+            rejets.append((index, f"annonce non objet: {type(annonce).__name__}"))
+            continue
+
         normalisee = _annonce_service_local(annonce, modele)
 
         if not _lien_valide(normalisee["lien"]):
@@ -291,18 +466,28 @@ def _rechercher_service_local(modele):
         annonces.append(normalisee)
 
     for index, raison in rejets:
+        diagnostic["raisons_rejet"].append({"index": index, "raison": raison})
         logger.info(
             "Facebook Marketplace service local: annonce_rejetee=%s raison=%s",
             index,
             raison
         )
 
+    diagnostic["annonces_normalisees"] = len(annonces_recues)
+    diagnostic["annonces_rejetees"] = len(rejets)
+    diagnostic["nombre_final_retourne"] = len(annonces)
     logger.info(
         "Facebook Marketplace service local: recues=%s rejetees=%s finales=%s",
         len(annonces_recues),
         len(rejets),
         len(annonces)
     )
+    _logger_diagnostic_local(diagnostic)
+    return annonces, diagnostic
+
+
+def _rechercher_service_local(modele):
+    annonces, _diagnostic = _rechercher_service_local_avec_diagnostic(modele)
     return annonces
 
 
@@ -656,3 +841,52 @@ def tester_sante():
         _ETAT["actif"] = False
 
     return False
+
+
+def diagnostic_service_local(modele):
+    try:
+        annonces, diagnostic = _rechercher_service_local_avec_diagnostic(modele)
+        diagnostic["nombre_final_retourne"] = len(annonces or [])
+        return diagnostic
+    except MarketplaceIndisponible as erreur:
+        diagnostic = dict(_DERNIER_DIAGNOSTIC_LOCAL or _diagnostic_vide())
+        diagnostic["local_url_definie"] = bool(LOCAL_SERVICE_URL)
+        diagnostic["local_token_defini"] = bool(LOCAL_SERVICE_TOKEN)
+        if not diagnostic.get("erreur"):
+            diagnostic["erreur"] = {
+                "code": "MARKETPLACE_INDISPONIBLE",
+                "type": type(erreur).__name__,
+                "message": str(erreur),
+            }
+            diagnostic["traceback"] = traceback.format_exc()
+        logger.exception(
+            "Facebook Marketplace diagnostic CLI erreur: type=%s message=%s",
+            type(erreur).__name__,
+            erreur,
+        )
+        return diagnostic
+
+
+def _main_cli():
+    parser = argparse.ArgumentParser(
+        description="Diagnostic du scanner Facebook Marketplace."
+    )
+    parser.add_argument(
+        "--diagnostic",
+        metavar="MODELE",
+        help="Appelle le service Marketplace local avec le meme code que Railway.",
+    )
+    args = parser.parse_args()
+
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(message)s")
+
+    if args.diagnostic:
+        diagnostic = diagnostic_service_local(args.diagnostic)
+        print(json.dumps(diagnostic, ensure_ascii=False, indent=2))
+        return
+
+    parser.print_help()
+
+
+if __name__ == "__main__":
+    _main_cli()
