@@ -450,6 +450,7 @@ def diagnostic_local():
         "chromium_args": options.get("args", []),
         "marketplace_location_id": _marketplace_location_id() or None,
         "marketplace_base_url": _marketplace_base_url(),
+        "marketplace_search_base_url": f"{_marketplace_base_url()}/search/",
         "headless": _headless(),
         "playwright_available": False,
         "errors": [],
