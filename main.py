@@ -1865,6 +1865,12 @@ async def europe(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def formater_resultat_marketplace(modele, annonces):
+    logger.info(
+        "Marketplace formatage debut: modele=%s nombre_recu=%s type=%s",
+        modele,
+        len(annonces) if annonces is not None else None,
+        type(annonces).__name__,
+    )
     etat = etat_marketplace()
     derniere_erreur = etat.get("derniere_erreur") or ""
     blocs = [
@@ -1883,12 +1889,26 @@ def formater_resultat_marketplace(modele, annonces):
             blocs.append(
                 derniere_erreur
             )
-            return "\n".join(blocs)
+            texte = "\n".join(blocs)
+            logger.info(
+                "Marketplace formatage fin: annonces_utilisees=0 "
+                "taille_message=%s decoupage_telegram=%s",
+                len(texte),
+                len(texte) > 3900,
+            )
+            return texte
 
         blocs.append(
             "Aucune annonce exploitable trouvée ou Marketplace temporairement indisponible."
         )
-        return "\n".join(blocs)
+        texte = "\n".join(blocs)
+        logger.info(
+            "Marketplace formatage fin: annonces_utilisees=0 "
+            "taille_message=%s decoupage_telegram=%s",
+            len(texte),
+            len(texte) > 3900,
+        )
+        return texte
 
     top = []
 
@@ -1925,7 +1945,15 @@ def formater_resultat_marketplace(modele, annonces):
             ])
         )
 
-    return "\n\n".join(blocs)
+    texte = "\n\n".join(blocs)
+    logger.info(
+        "Marketplace formatage fin: annonces_utilisees=%s taille_message=%s "
+        "decoupage_telegram=%s",
+        len(top),
+        len(texte),
+        len(texte) > 3900,
+    )
+    return texte
 
 
 def source_marketplace_etat():
@@ -1958,9 +1986,27 @@ async def marketplace(update: Update, context: ContextTypes.DEFAULT_TYPE):
     modele = " ".join(context.args).strip()
     await update.message.reply_text("🛒 Scan Facebook Marketplace en cours...")
     annonces = rechercher_marketplace(modele)
+    logger.info(
+        "Marketplace commande apres recherche: modele=%s len=%s type=%s",
+        modele,
+        len(annonces) if annonces is not None else None,
+        type(annonces).__name__,
+    )
+    logger.info(
+        "Marketplace commande avant formatage: modele=%s len=%s",
+        modele,
+        len(annonces) if annonces is not None else None,
+    )
     texte = formater_resultat_marketplace(modele, annonces)
 
-    for message in decouper_messages([texte], limite=3900):
+    messages = decouper_messages([texte], limite=3900)
+    logger.info(
+        "Marketplace commande decoupage Telegram: messages=%s longueurs=%s",
+        len(messages),
+        [len(message) for message in messages],
+    )
+
+    for message in messages:
         await update.message.reply_text(message)
 
 
@@ -3497,9 +3543,27 @@ async def gerer_reply_keyboard(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data.pop("attente_scan_marketplace", None)
         await update.message.reply_text("🛒 Scan Facebook Marketplace en cours...")
         annonces = rechercher_marketplace(texte)
+        logger.info(
+            "Marketplace bouton apres recherche: modele=%s len=%s type=%s",
+            texte,
+            len(annonces) if annonces is not None else None,
+            type(annonces).__name__,
+        )
+        logger.info(
+            "Marketplace bouton avant formatage: modele=%s len=%s",
+            texte,
+            len(annonces) if annonces is not None else None,
+        )
         reponse = formater_resultat_marketplace(texte, annonces)
 
-        for message in decouper_messages([reponse], limite=3900):
+        messages = decouper_messages([reponse], limite=3900)
+        logger.info(
+            "Marketplace bouton decoupage Telegram: messages=%s longueurs=%s",
+            len(messages),
+            [len(message) for message in messages],
+        )
+
+        for message in messages:
             await update.message.reply_text(message, reply_markup=clavier_scanner_business())
         return
 
