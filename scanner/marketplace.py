@@ -20,7 +20,7 @@ SEUIL_ECHECS = 3
 TEST_SANTE_RECHERCHE = "golf"
 LOCAL_SERVICE_URL = os.getenv("MARKETPLACE_LOCAL_URL", "").strip().rstrip("/")
 LOCAL_SERVICE_TOKEN = os.getenv("MARKETPLACE_LOCAL_TOKEN", "").strip()
-LOCAL_SERVICE_TIMEOUT = 12
+LOCAL_SERVICE_TIMEOUT = (10, 45)
 
 logger = logging.getLogger(__name__)
 
@@ -399,7 +399,7 @@ def _rechercher_service_local_avec_diagnostic(modele):
     except requests.exceptions.Timeout as erreur:
         _erreur_diagnostic(diagnostic, "TIMEOUT", erreur)
         raise MarketplaceIndisponible(
-            f"service local Marketplace timeout: {erreur}"
+            "Le Samsung Marketplace met trop de temps à répondre."
         ) from erreur
     except requests.exceptions.RequestException as erreur:
         _erreur_diagnostic(diagnostic, "REQUEST_ERROR", erreur)
